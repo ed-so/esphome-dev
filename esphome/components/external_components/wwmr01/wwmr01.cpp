@@ -1,5 +1,5 @@
-#include "wwmr01.h"
 #include "esphome/core/helpers.h"
+#include "wwmr01.h"
 
 namespace esphome {
 namespace wwmr01 {
@@ -146,7 +146,7 @@ void WWMR01Component::factory_reset_action() {
 void WWMR01Component::restart_module_action() {
   ESP_LOGCONFIG(TAG, "Restarting WWMR01 module...");
   this->send_module_restart();
-  delay_microseconds_safe(45000);
+  // delay_microseconds_safe(45000);
   // this->set_config_mode(true);
   // this->set_system_mode(system_mode_);
   // this->set_config_mode(false);
@@ -176,6 +176,34 @@ void WWMR01Component::loop() {
   }
 }  
 
+void WWMR01Component::readline_(int rx_data, uint8_t *buffer, int len) {
+  static int pos = 0;
+
+  if (rx_data >= 0) {
+    if (pos < len - 1) {
+      buffer[pos++] = rx_data;
+      buffer[pos] = 0;
+    } else {
+      pos = 0;
+    }
+    if (pos >= 4) {
+      // if (memcmp(&buffer[pos - 4], &CMD_FRAME_FOOTER, sizeof(CMD_FRAME_FOOTER)) == 0) {
+      //   this->set_cmd_active_(false);  // Set command state to inactive after responce.
+      //   this->handle_ack_data_(buffer, pos);
+      //   pos = 0;
+      // } else if ((buffer[pos - 2] == 0x0D && buffer[pos - 1] == 0x0A) && (get_mode_() == CMD_SYSTEM_MODE_SIMPLE)) {
+      //   this->handle_simple_mode_(buffer, pos);
+      //   pos = 0;
+      // } else if ((memcmp(&buffer[pos - 4], &ENERGY_FRAME_FOOTER, sizeof(ENERGY_FRAME_FOOTER)) == 0) &&
+      //            (get_mode_() == CMD_SYSTEM_MODE_ENERGY)) {
+      //   this->handle_energy_mode_(buffer, pos);
+      //   pos = 0;
+      // }
+    }
+  }
+}  
+
+
 // Sends a restart and set system running mode to normal
 void WWMR01Component::send_module_restart() { this->wwmr01_restart(); }
 
@@ -202,33 +230,6 @@ void WWMR01Component::get_firmware_version_() {
   ESP_LOGD(TAG, "Sending read firmware version command: %2X", cmd_frame.command);
   // this->send_cmd_from_array(cmd_frame);
 } 
-
-void WWMR01Component::readline_(int rx_data, uint8_t *buffer, int len) {
-  // static int pos = 0;
-
-  // if (rx_data >= 0) {
-  //   if (pos < len - 1) {
-  //     buffer[pos++] = rx_data;
-  //     buffer[pos] = 0;
-  //   } else {
-  //     pos = 0;
-  //   }
-  //   if (pos >= 4) {
-  //     if (memcmp(&buffer[pos - 4], &CMD_FRAME_FOOTER, sizeof(CMD_FRAME_FOOTER)) == 0) {
-  //       this->set_cmd_active_(false);  // Set command state to inactive after responce.
-  //       this->handle_ack_data_(buffer, pos);
-  //       pos = 0;
-  //     } else if ((buffer[pos - 2] == 0x0D && buffer[pos - 1] == 0x0A) && (get_mode_() == CMD_SYSTEM_MODE_SIMPLE)) {
-  //       this->handle_simple_mode_(buffer, pos);
-  //       pos = 0;
-  //     } else if ((memcmp(&buffer[pos - 4], &ENERGY_FRAME_FOOTER, sizeof(ENERGY_FRAME_FOOTER)) == 0) &&
-  //                (get_mode_() == CMD_SYSTEM_MODE_ENERGY)) {
-  //       this->handle_energy_mode_(buffer, pos);
-  //       pos = 0;
-  //     }
-  //   }
-  // }
-}  
 
 #ifdef USE_NUMBER
 void WWMR01Component::init_config_numbers() {

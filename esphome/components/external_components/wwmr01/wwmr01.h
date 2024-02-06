@@ -37,6 +37,8 @@ namespace wwmr01 {
 // static const uint8_t WW_MR01_TOTAL_GATES = 16;
 static const uint16_t FACTORY_TIMEOUT = 120;
 
+
+
 class WWMR01Listener {
  public:
   virtual void on_presence(bool presence){};
@@ -185,7 +187,7 @@ class WWMR01Component : public Component, public uart::UARTDevice {
 //   uint16_t get_distance_() { return this->distance_; };
 //   void set_distance_(uint16_t distance) { this->distance_ = distance; };
    bool get_cmd_active_() { return this->cmd_active_; };
-//   void set_cmd_active_(bool active) { this->cmd_active_ = active; };
+   void set_cmd_active_(bool active) { this->cmd_active_ = active; };
 //   void handle_simple_mode_(const uint8_t *inbuf, int len);
 //   void handle_energy_mode_(uint8_t *buffer, int len);
 //   void handle_ack_data_(uint8_t *buffer, int len);
