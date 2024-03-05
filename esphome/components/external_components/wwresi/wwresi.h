@@ -1,7 +1,10 @@
+#include "line-buffer.h"
+
+
 #pragma once
 
+
 #include "esphome/core/defines.h"
-#include "esphome/core/component.h"
 #ifdef USE_BINARY_SENSOR
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #endif
@@ -24,17 +27,26 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #endif
 #include "esphome/components/uart/uart.h"
+#include "esphome/components/socket/socket.h"
+#include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/helpers.h"
 
-//#include "line-buffer.h"
 
+#include <cinttypes>
 #include <map>
+#include <memory>
+#include <set>
+#include <vector>
 #include <functional>
 #include <list>
+#include <string>
+
+using std::string;// std::cin, std::cout, std::endl; // C++17 or later
+
 
 namespace esphome {
-namespace wwmr01 {
+namespace wwresi {
 
 
 // static const uint8_t WW_MR01_TOTAL_GATES = 16;
@@ -46,7 +58,7 @@ static const int CALIBRATE_VERSION_MIN = 154;
 
 
 
-class WWMR01Listener {
+class WWRESIListener {
  public:
   virtual void on_presence(bool presence){};
   virtual void on_distance(uint16_t distance){};
@@ -55,20 +67,40 @@ class WWMR01Listener {
 };
 
 
-class WWMR01Component : public Component, public uart::UARTDevice {
+class WWRESIComponent : public Component, public uart::UARTDevice {
  public:
+  WWRESIComponent();
+  ~WWRESIComponent(); 
  
   // Component methods
+  /** Where the component's initialization should happen.
+   *
+   * Analogous to Arduino's setup(). This method is guaranteed to only be called once.
+   * Defaults to doing nothing.
+   */
   void setup() override;
+
+ /** prints the user configuration.
+   * 
+   * 
+   * 
+  */
   void dump_config() override;
+
+  /** This method will be called repeatedly.
+   *
+   * Analogous to Arduino's loop(). setup() is guaranteed to be called before this.
+   * Defaults to doing nothing.
+   */
   void loop() override;
   
   // Custom methods
   
   
-// #ifdef USE_SELECT
-//   void set_operating_mode_select(select::Select *selector) { this->operating_selector_ = selector; };
-// #endif
+  // #ifdef USE_SELECT
+  //   void set_operating_mode_select(select::Select *selector) { this->operating_selector_ = selector; };
+  // #endif
+
 #ifdef USE_NUMBER
    void set_timeout_number(number::Number *number) { this->timeout_number_ = number; };
 //   void set_gate_select_number(number::Number *number) { this->gate_select_number_ = number; };
@@ -104,7 +136,7 @@ class WWMR01Component : public Component, public uart::UARTDevice {
    void set_factory_reset_button(button::Button *button) { this->factory_reset_button_ = button; };
  #endif
 
-   void register_listener(WWMR01Listener *listener) { this->listeners_.push_back(listener); }
+   void register_listener(WWRESIListener *listener) { this->listeners_.push_back(listener); }
 
    struct CmdFrameT {
      uint32_t header{0};
@@ -173,9 +205,13 @@ class WWMR01Component : public Component, public uart::UARTDevice {
 //   void set_reg_value(uint16_t reg, uint16_t value);
 //   uint8_t set_config_mode(bool enable);
 //   void set_system_mode(uint16_t mode);
-  void wwmr01_restart();
+  void wwresi_restart();
 
-  protected:
+ protected:
+  std::unique_ptr<socket::Socket> socket_;
+
+
+
 //   struct CmdReplyT {
 //     uint8_t command;
 //     uint8_t status;
@@ -203,7 +239,12 @@ class WWMR01Component : public Component, public uart::UARTDevice {
 //   void handle_ack_data_(uint8_t *buffer, int len);
    void readline_(int rx_data, uint8_t *buffer, int len);
 
-   void handle_command_(uint8_t *buffer); 
+   void handle_command_(uint8_t *buffer, int len); 
+   void handle_string_command_(std::string str);
+
+   int handleCommand(class LineBuffer * stream, string & line);
+
+   void writeToAll(const string & str, LineBuffer::flags dest);
 
 //   void set_calibration_(bool state) { this->calibration_ = state; };
 //   bool get_calibration_() { return this->calibration_; };
@@ -230,8 +271,8 @@ class WWMR01Component : public Component, public uart::UARTDevice {
 //   bool calibration_{false};
 //   uint16_t distance_{0};
 //   uint8_t config_checksum_{0};
-  std::vector<WWMR01Listener *> listeners_{};
+  std::vector<WWRESIListener *> listeners_{};
 };
 
-}  // namespace wwmr01
+}  // namespace wwresi
 }  // namespace esphome

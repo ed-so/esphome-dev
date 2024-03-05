@@ -15,20 +15,15 @@ GetData(string &line) - try to read single line.
 #include "line-buffer.h"
 
 
-// class LineBuffer : public stringstream {
-// public:
-// 	enum bufstate {EMPTY, COMPLETE, INCOMPLETE};
-// 	enum flags {F_ECHO_DIN = 1, F_ECHO_OTHER=2, F_ECHO_INDX=4, F_DEF = 0};
-// 	LineBuffer(int fd, t_HANDLER * handler = NULL);
-// 	void virtual AddData(const char *data);
-// 	int virtual ProcessData(t_HANDLER handler = NULL);
-// 	enum bufstate GetData(string & line);
 
-// 	t_HANDLER *m_handler;	
-// 	int m_fd;
-// 	int m_flags;
-// };
 
+
+
+
+
+/// @brief 
+/// @param fd 
+/// @param handler 
 LineBuffer::LineBuffer(int fd, t_HANDLER * handler) 
 	: stringstream(stringstream::in | stringstream::out) {
 	m_fd = fd;
@@ -42,7 +37,7 @@ void LineBuffer::AddData(const char *data) {
 }
 
 int LineBuffer::ProcessData(t_HANDLER *handler) {
-	bool ret;
+	//bool ret;
 	int cnt = 0;
 	
 	if(handler == NULL) {
