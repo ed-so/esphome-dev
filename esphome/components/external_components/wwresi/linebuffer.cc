@@ -12,75 +12,13 @@ GetData(string &line) - try to read single line.
 
 */
 
-#include "linebuffer.h"
+#include "Linebuffer.h"
 
 #include <iostream>
 #include <sstream>
 #include <list>
 
-
-
-// linebuffer::linebuffer(int fd, t_HANDLER * handler)
-// 	: stringstream(stringstream::in | stringstream::out) {
-// 	m_fd = fd;
-// 	m_handler = handler;
-// 	m_flags = F_DEF;
-// }
-
-linebuffer::linebuffer(int fd) : stringstream(stringstream::in | stringstream::out) {
-  m_fd = fd;
-  m_handler = NULL;
-  m_flags = F_DEF;
-}
-
-void linebuffer::AddData(const char *data) {
-  *this << data;
-  ProcessData();
-}
-
-// int linebuffer::ProcessData(t_HANDLER *handler) {
-//   bool ret;
-//   int cnt = 0;
-
-//   if (handler == NULL) {
-//     handler = m_handler;
-//   }
-
-//   string line;
-
-//   while (GetData(line) == COMPLETE) {
-//     cnt++;
-//     if (handler)
-//       handler(this, line);
-//   }
-
-//   return cnt;
-// }
-
-/** get complete lines out of the buffer.
-  every time this function returns EMPTY or INCOMPLETE internal buffer
-  is guaranteed to be freed. This combined with while(GetData(line) == COMPLETE)
-  above makes sure there are no memory leaks.
-*/
-linebuffer::bufstate linebuffer::GetData(string &line) {
-  if (std::getline(*this, line)) {
-    if (eof()) {
-      // new line character not present, line was not complete, return it to the buffer
-      clear();  // reset error (eof) status
-      str("");  // free internal buffer
-      // put back first characters of incoming not complete line
-      //*this << line;
-      write(line.data(), line.size());
-      return INCOMPLETE;
-    }
-    return COMPLETE;
-  }
-  clear();  // reset error (eof) status
-  str("");  // free internal buffer
-  return EMPTY;
-}
-
-int printall(class linebuffer *stream, string &line) {
+int printall(class Linebuffer *stream, string &line) {
   cerr << ":" << stream->m_fd << ":" << line << ";\n";
   return 0;
 }
@@ -91,7 +29,7 @@ int main(int argc, char *argv[]) {
   string re;
   {
     int i;
-    LineBuffer buf1(2, printall);
+    Linebuffer buf1(2, printall);
 
     for (i = 0; i < 100000; i++) {
       cerr << "+";
@@ -115,4 +53,3 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 #endif
-

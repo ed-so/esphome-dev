@@ -22,14 +22,6 @@ class WWRESIMinDistanceNumber : public number::Number, public Parented<WWRESICom
   void control(float min_gate) override;
 };
 
-class WW_MR01MaxDistanceNumber : public number::Number, public Parented<WWRESIComponent> {
- public:
-  WW_MR01MaxDistanceNumber() = default;
-
- protected:
-  void control(float max_gate) override;
-};
-
 // class WW_MR01GateSelectNumber : public number::Number, public Parented<WWRESIComponent> {
 //  public:
 //   WW_MR01GateSelectNumber() = default;

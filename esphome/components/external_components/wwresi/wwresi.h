@@ -44,7 +44,7 @@
 #include "esphome/core/helpers.h"
 
 
-
+#include "linebuffer.h"
 
 
 using std::string;// std::cin, std::cout, std::endl; // C++17 or later
@@ -52,6 +52,8 @@ using std::string;// std::cin, std::cout, std::endl; // C++17 or later
 
 namespace esphome {
 namespace wwresi {
+
+static const char *const TAG = "wwresi";
 
 
 static const uint8_t WW_MR01_TOTAL_GATES = 16;
@@ -247,7 +249,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
    void handle_command_(uint8_t *buffer, int len); 
    void handle_string_command_(std::string str);
 
-   static int handleCommand(class Line_Buffer * stream, string & line);
+   static int handleCommand(class Linebuffer *stream, string &line);
 
    //void writeToAll(const string & str, Line_Buffer::flags dest);
 
