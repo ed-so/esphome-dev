@@ -1,7 +1,18 @@
-#include "line-buffer.h"
-
-
 #pragma once
+
+
+#include <cinttypes>
+#include <map>
+#include <memory>
+#include <set>
+#include <vector>
+#include <functional>
+#include <string>
+
+#include <iostream>
+#include <sstream>
+#include <list>
+
 
 
 #include "esphome/core/defines.h"
@@ -33,14 +44,8 @@
 #include "esphome/core/helpers.h"
 
 
-#include <cinttypes>
-#include <map>
-#include <memory>
-#include <set>
-#include <vector>
-#include <functional>
-#include <list>
-#include <string>
+
+
 
 using std::string;// std::cin, std::cout, std::endl; // C++17 or later
 
@@ -49,10 +54,10 @@ namespace esphome {
 namespace wwresi {
 
 
-// static const uint8_t WW_MR01_TOTAL_GATES = 16;
+static const uint8_t WW_MR01_TOTAL_GATES = 16;
 static const uint16_t FACTORY_TIMEOUT = 120;
 
-// 
+
 static const int CALIBRATE_VERSION_MIN = 154;
 
 
@@ -242,9 +247,9 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
    void handle_command_(uint8_t *buffer, int len); 
    void handle_string_command_(std::string str);
 
-   int handleCommand(class LineBuffer * stream, string & line);
+   static int handleCommand(class Line_Buffer * stream, string & line);
 
-   void writeToAll(const string & str, LineBuffer::flags dest);
+   //void writeToAll(const string & str, Line_Buffer::flags dest);
 
 //   void set_calibration_(bool state) { this->calibration_ = state; };
 //   bool get_calibration_() { return this->calibration_; };

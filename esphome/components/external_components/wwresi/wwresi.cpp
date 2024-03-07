@@ -1,14 +1,10 @@
 
-
+#include "wwresi.h"
 #include <unistd.h>
 #include <list>
-
-#include "wwresi.h"
-
-//#include "line-buffer.h"
+#include <algorithm>
 
 using std::string;
-#include <algorithm>
 
 namespace esphome {
 namespace wwresi {
@@ -17,7 +13,7 @@ static const char *const TAG = "wwresi";
 
 /** global variables */
 
-t_STREAM_LIST streams;
+
 
 /* void WriteToAll(const string & str, LineBuffer::flags dest) {
   t_STREAM_LIST::iterator i;
@@ -29,12 +25,15 @@ t_STREAM_LIST streams;
 }
  */
 
+  //streams.push_front(new Line_Buffer(1, handleCommand));  // fd=1 socket
+
+
 //---------------------------------------------------------------------------
 /** Initialize this wwresi component
  *
  */
-WWRESIComponent::WWRESIComponent() { 
-  //streams.push_front(new LineBuffer(0, handleCommand)); 
+WWRESIComponent::WWRESIComponent() {
+
 }
 
 //---------------------------------------------------------------------------
@@ -144,6 +143,10 @@ void WWRESIComponent::setup() {
   //   this->set_system_mode(this->system_mode_);
   //   this->set_config_mode(false);
 
+
+//streams.push_front(new Line_Buffer(1, handleCommand));  // fd=1 socket
+//streams.insert(streams.begin(), new Line_Buffer(1));  // fd=1 socket
+
   ESP_LOGCONFIG(TAG, "WWRESI setup complete.");
 }
 
@@ -234,6 +237,14 @@ void WWRESIComponent::revert_config_action() {
 void WWRESIComponent::loop() {
   // If there is a active send command do not process it here, the send command call will handle it.
   if (!get_cmd_active_()) {
+
+
+    //Line_Buffer mylb(1,handleCommand);
+
+    //streams.insert(streams.begin(), new Line_Buffer(1));  // fd=1 socket
+    //streams.push_front(new Line_Buffer(1, handleCommand));  // fd=1 socket
+
+    // uart data input
     if (!available())
       return;
     static uint8_t buffer[2048];
@@ -272,6 +283,7 @@ void WWRESIComponent::readline_(int rx_data, uint8_t *buffer, int len) {
 void WWRESIComponent::handle_command_(uint8_t *buffer, int len) {
   int fd;
   int ret;
+  //t_Line_Buffer_List::iterator i;  
 
   ESP_LOGD(TAG, "CMD: %s", buffer);
   this->write_str("OK 0\r\n");
@@ -285,6 +297,10 @@ void WWRESIComponent::handle_command_(uint8_t *buffer, int len) {
   }
 
   std::stringstream ss;
+
+  // for (i = streams.begin(); i != streams.end();) {
+  //   (*i)->AddData((char *) buffer);
+  // }
 
   handle_string_command_(str);
 
@@ -308,54 +324,54 @@ void WWRESIComponent::handle_string_command_(std::string str) {
   this->write_str((str + " uart\r\n").c_str());
 }
 
-int handleCommand(class LineBuffer *stream, string &line) {
-  ostringstream ack;
-  unsigned int channels = 0;
-  int unit = 1;
-  char unitch = 0;
-  char *end_ptr;
-  double val;
-  int ret;
+// int WWRESIComponent::handleCommand(class Line_Buffer *stream, string &line) {
+//   ostringstream ack;
+//   unsigned int channels = 0;
+//   int unit = 1;
+//   char unitch = 0;
+//   char *end_ptr;
+//   double val;
+//   int ret;
 
-  transform(line.begin(), line.end(), line.begin(), (int (*)(int)) toupper);
-  istringstream input(line);
-  string cmd;
-  string chan;
-  string value;
-  bool do_rst = false;
+//   transform(line.begin(), line.end(), line.begin(), (int (*)(int)) toupper);
+//   istringstream input(line);
+//   string cmd;
+//   string chan;
+//   string value;
+//   bool do_rst = false;
 
-  input >> cmd;
-  ESP_LOGD(TAG, "cmd  : %s ", cmd);
-  input >> chan;
-  ESP_LOGD(TAG, "chan : %s ", chan);
-  input >> value;
-  ESP_LOGD(TAG, "value: %s ", value);
-
-
+//   input >> cmd;
+//   ESP_LOGD(TAG, "cmd  : %s ", cmd);
+//   input >> chan;
+//   ESP_LOGD(TAG, "chan : %s ", chan);
+//   input >> value;
+//   ESP_LOGD(TAG, "value: %s ", value);
 
 
-  return 0;
 
-}
 
-void WWRESIComponent::writeToAll(const string &str, LineBuffer::flags dest) {
-  t_STREAM_LIST::iterator i;
-  for (i = streams.begin(); i != streams.end(); ++i) {
-    if ((*i)->m_flags & dest) {
-      switch ((*i)->m_fd) {
-        case 0:  // uart
-                 // code
-          write_str((str.data()));
-          break;
+//   return 0;
 
-        default:
-          break;
-      }
+// }
 
-      //////  write((*i)->m_fd, str.data(), str.length());
-    }
-  }
-}
+// void WWRESIComponent::writeToAll(const string &str, Line_Buffer::flags dest) {
+//   t_Line_Buffer_List::iterator i;
+//   for (i = streams.begin(); i != streams.end(); ++i) {
+//     if ((*i)->m_flags & dest) {
+//       switch ((*i)->m_fd) {
+//         case 0:  // uart
+//                  // code
+//           write_str((str.data()));
+//           break;
+
+//         default:
+//           break;
+//       }
+
+//       //////  write((*i)->m_fd, str.data(), str.length());
+//     }
+//   }
+// }
 
 //---------------------------------------------------------------------------
 // Sends a restart and set system running mode to normal
