@@ -12,18 +12,15 @@ GetData(string &line) - try to read single line.
 
 */
 
-#include "Linebuffer.h"
+#include "linebuffer.h"
 
-#include <iostream>
-#include <sstream>
-#include <list>
+#ifdef _TEST_LIBRARY
 
 int printall(class Linebuffer *stream, string &line) {
   cerr << ":" << stream->m_fd << ":" << line << ";\n";
   return 0;
 }
 
-#ifdef _TEST_LIBRARY
 
 int main(int argc, char *argv[]) {
   string re;
