@@ -37,33 +37,32 @@ class Linebuffer : public std::stringstream {
   enum flags { F_ECHO_DIN = 1, F_ECHO_OTHER = 2, F_ECHO_INDX = 4, F_DEF = 0 };
 
   void AddData(const std::string data) {
-    ESP_LOGD("wwresi", "data: add  %s", data.c_str());
+    *this << (data.c_str());
 
-    std::string add(data);
-    ESP_LOGD("wwresi", "data: add0 %s", add.c_str());
+    // add = '-';
 
-    *this << add;
+    // ESP_LOGD("wwresi", "data: add1 %s", add.c_str());
 
-    ESP_LOGD("wwresi", "data: add1 %s", add.c_str());
-
-
-    *this  >> add;
+    // *this  >> add;
     
-    ESP_LOGD("wwresi", "data: add2 %s", add.c_str());
+    // ESP_LOGD("wwresi", "data: add2 %s", add.c_str());
 
+    // add = '-';
+
+    // *this  >> add;
+    
+    // ESP_LOGD("wwresi", "data: add3 %s", add.c_str());
 
     ProcessData(NULL);
   }
 
   int ProcessData(t_HANDLER *handler) {
     int cnt = 0;
-    ESP_LOGD("wwresi", "cnt0  PD  %d", cnt);
+    ESP_LOGD("wwresi", "cnt_b  PD  %d", cnt);
     if (handler == NULL) {
       handler = m_handler;
     }
-    ESP_LOGD("wwresi", "cnt1  PD  %d", cnt);
-    std::string line = "";
-    ESP_LOGD("wwresi", "cnt2  PD  %d", cnt);
+    std::string line = "---";
 
     bufstate bf = EMPTY;
 
@@ -73,7 +72,7 @@ class Linebuffer : public std::stringstream {
       if (handler)
         handler(this, line);
     }
-    ESP_LOGD("wwresi", "cnt3  PD  %d - line %s", cnt, line.c_str());
+    ESP_LOGD("wwresi", "cnt_e  PD  %d - line %s", cnt, line.c_str());
     return cnt;
   }
 
@@ -87,9 +86,14 @@ class Linebuffer : public std::stringstream {
     above makes sure there are no memory leaks.
   */
   bufstate GetData(std::string &line) {
-    ESP_LOGD("wwresi", "data: GD0  %s", line.c_str());
+    // std::string tst;
+    // *this >> tst;
+
+    // ESP_LOGD("wwresi", "data: GD0  %s", tst.c_str());
+    // ESP_LOGD("wwresi", "data: GD1  %s", line.c_str());
+
     if (std::getline(*this, line)) {
-      ESP_LOGD("wwresi", "data: GD1  %s", line.c_str());
+      ESP_LOGD("wwresi", "data: GD11  %s", line.c_str());
       if (eof()) {
         // new line character not present, line was not complete, return it to the buffer
         clear();  // reset error (eof) status
@@ -97,12 +101,15 @@ class Linebuffer : public std::stringstream {
         // put back first characters of incoming not complete line
         //*this << line;
         write(line.data(), line.size());
+        ESP_LOGD("wwresi", "data: GD12  %s", "INCOMPLETE");
         return INCOMPLETE;
       }
+      ESP_LOGD("wwresi", "data: GD13  %s", "COMPLETE");
       return COMPLETE;
     }
     clear();  // reset error (eof) status
     str("");  // free internal buffer
+    ESP_LOGD("wwresi", "data: GD2  %s", "EMPTY");
     return EMPTY;
   }
 

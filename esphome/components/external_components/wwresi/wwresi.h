@@ -246,7 +246,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 //   void handle_ack_data_(uint8_t *buffer, int len);
    void readline_(int rx_data, uint8_t *buffer, int len);
 
-   void handle_command_(uint8_t *buffer, int len); 
+   void addCommandToallStreams_(uint8_t *buffer, int len); 
    void handle_string_command_(std::string str);
 
    static int handleCommand(class Linebuffer *stream, string &line);

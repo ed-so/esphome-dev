@@ -668,6 +668,7 @@ enum {RESI_RELAYS_N = 3,
 	RESI_DECADE_MULT_FACT_M = 100000,
 	RESI_RELAYS_BITS = 20,
 	};
+
 /** function based on PwdOutValue from Pwd-Treiber.txt (Pascal).
 	@param[in] value resistance in Ohm, negative means open, maximum ::RESI_R_MAX
 	@param[out] relays 3 bytes containing relay settings to get value Ohm
