@@ -38,23 +38,10 @@ class Linebuffer : public std::stringstream {
 
   void AddData(const std::string data) {
     *this << (data.c_str());
-
-    // add = '-';
-
-    // ESP_LOGD("wwresi", "data: add1 %s", add.c_str());
-
-    // *this  >> add;
-    
-    // ESP_LOGD("wwresi", "data: add2 %s", add.c_str());
-
-    // add = '-';
-
-    // *this  >> add;
-    
-    // ESP_LOGD("wwresi", "data: add3 %s", add.c_str());
-
     ProcessData(NULL);
   }
+
+  std::string Line = "";
 
   int ProcessData(t_HANDLER *handler) {
     int cnt = 0;
@@ -62,17 +49,19 @@ class Linebuffer : public std::stringstream {
     if (handler == NULL) {
       handler = m_handler;
     }
-    std::string line = "---";
+
+    std::string line = Line = "";
 
     bufstate bf = EMPTY;
 
     while (GetData(line) == COMPLETE) {
       cnt++;
-      ESP_LOGD("wwresi", "data: PD  %s", line.c_str());
+      ESP_LOGD("wwresi", "data: PD0  %s", line.c_str());
+      Line = line;
       if (handler)
         handler(this, line);
     }
-    ESP_LOGD("wwresi", "cnt_e  PD  %d - line %s", cnt, line.c_str());
+    ESP_LOGD("wwresi", "cnt_e  PDx  %d - line %s", cnt, Line.c_str());
     return cnt;
   }
 
@@ -102,6 +91,7 @@ class Linebuffer : public std::stringstream {
         //*this << line;
         write(line.data(), line.size());
         ESP_LOGD("wwresi", "data: GD12  %s", "INCOMPLETE");
+        line = "";
         return INCOMPLETE;
       }
       ESP_LOGD("wwresi", "data: GD13  %s", "COMPLETE");
@@ -110,6 +100,7 @@ class Linebuffer : public std::stringstream {
     clear();  // reset error (eof) status
     str("");  // free internal buffer
     ESP_LOGD("wwresi", "data: GD2  %s", "EMPTY");
+    line = "";
     return EMPTY;
   }
 

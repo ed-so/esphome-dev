@@ -62,6 +62,13 @@ static const uint16_t FACTORY_TIMEOUT = 120;
 
 static const int CALIBRATE_VERSION_MIN = 154;
 
+static const int S_UART = 0;
+static const int S_NET = 1;
+static const int S_CAN = 2;
+
+//int fdUdp;
+//int fdError;
+//int fdIn;
 
 
 
@@ -145,14 +152,14 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 
    void register_listener(WWRESIListener *listener) { this->listeners_.push_back(listener); }
 
-   struct CmdFrameT {
-     uint32_t header{0};
-     uint16_t length{0};
-     uint16_t command{0};
-     uint8_t data[18];
-     uint16_t data_length{0};
-     uint32_t footer{0};
-   };
+  //  struct CmdFrameT {
+  //    uint32_t header{0};
+  //    uint16_t length{0};
+  //    uint16_t command{0};
+  //    uint8_t data[18];
+  //    uint16_t data_length{0};
+  //    uint32_t footer{0};
+  //  };
 
    struct RegConfigT {
      uint16_t min_gate{0};
@@ -246,12 +253,14 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 //   void handle_ack_data_(uint8_t *buffer, int len);
    void readline_(int rx_data, uint8_t *buffer, int len);
 
-   void addCommandToallStreams_(uint8_t *buffer, int len); 
+   void addCommandToStream_(int streamNr, uint8_t *buffer, int len); 
    void handle_string_command_(std::string str);
 
-   static int handleCommand(class Linebuffer *stream, string &line);
+   int handleCommand(int streamNr, class Linebuffer *stream, string &line);
 
    //void writeToAll(const string & str, Line_Buffer::flags dest);
+
+
 
 //   void set_calibration_(bool state) { this->calibration_ = state; };
 //   bool get_calibration_() { return this->calibration_; };
@@ -279,6 +288,8 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 //   uint16_t distance_{0};
 //   uint8_t config_checksum_{0};
   std::vector<WWRESIListener *> listeners_{};
+
+  t_Linebuffer_List streams;
 };
 
 }  // namespace wwresi

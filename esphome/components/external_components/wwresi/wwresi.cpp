@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <list>
 #include <algorithm>
+#include "esphome/core/application.h"
 
 using std::string;
 
@@ -12,7 +13,6 @@ namespace wwresi {
 /** global variables */
 
 char version[] = "RESI MR01 V0.1";
-
 
 t_Linebuffer_List streams;
 
@@ -30,9 +30,6 @@ t_Linebuffer_List streams;
 
 #define DIN_MASK 0xf
 
-
-
-
 #define TRUE true
 #define FALSE false
 #define SERIAL_DEV "/dev/ttyS1"
@@ -40,45 +37,39 @@ t_Linebuffer_List streams;
 #define ACK_FIND 0x10
 #define ACK_GET 0x13
 #define ACK_TYPE 0x18
-#define ACK_CAN 0x1f	//for the rest of can-cmd.
+#define ACK_CAN 0x1f  // for the rest of can-cmd.
 
-//for broadcasting 
+// for broadcasting
 #define BROAD_CAN_RID 100
-//RESI-Serialnumber
+
+// RESI-Serialnumber
 #define SN 1234
-//RESI-TYP
-#define TYP  0x2
+// RESI-TYP
+#define TYP 0x2
 #define DIN_MASK 0xf
 
-#define RESOLUTION 1 //for resolution 1 -> 0x81 for resolution 10 -> 0x91 (Formel in der Spezifikation)
+#define RESOLUTION 1  // for resolution 1 -> 0x81 for resolution 10 -> 0x91 (Formel in der Spezifikation)
 
 int debug = 0;
 int watchdog = 0;
 
 unsigned long brid = BROAD_CAN_RID;
-//var. for RID
+// var. for RID
 unsigned long rid = 100;
-//var. for TID
+// var. for TID
 unsigned long tid = 101;
 unsigned long serialnr = SN;
 unsigned long serial_pcb = 0;
-//Typ
-//can mesg. ext
-unsigned int ext=0;
-unsigned int can_identifier=(1<<11)-1;	//std. 536870911 (29 bits) or 2047(11 bits)
+// Typ
+// can mesg. ext
+unsigned int ext = 0;
+unsigned int can_identifier = (1 << 11) - 1;  // std. 536870911 (29 bits) or 2047(11 bits)
 unsigned int can_bitrate = 500;
 
-int fdNet;
-int fdUdp;
-int fdError;
-int fdIn;
-int can_fd;
-//todo eso  canmsg_t rx;
-//todo eso  canmsg_t tx;
-
+// todo eso  canmsg_t rx;
+// todo eso  canmsg_t tx;
 
 typedef int t_TIME;
-
 
 enum e_resi_type { RESI_T_K = 0, RESI_T_M = 1 };
 
@@ -112,7 +103,6 @@ enum e_CHANNELS {
 
 enum e_MODE { REMOTE = 0, LOCAL = 1 };
 
-
 enum e_CONSTANTS { INDEX_MAX = 256, DEBOUNCE_DIN = 20000 };
 
 e_MODE Mode[CH_R_N];
@@ -120,7 +110,6 @@ e_MODE Mode[CH_R_N];
 int LastDIN[CH_R_N];
 int ConfirmedDIN[CH_R_N];
 t_TIME tLastDINChanged[CH_R_N];
-
 
 double ValCurrent[CH_N];
 double ValSet[CH_R_N];
@@ -133,26 +122,23 @@ string ValIpNetmask = "";
 string ValIpGateway = "";
 int ValConfigVersion = -1;
 
-
-FILE * fLog;
+FILE *fLog;
 long iBusFlags;
 time_t tsStarted;
-long tmLastVerified=0;
+long tmLastVerified = 0;
 long tmNow;  // current time, global, will be updated in many places
-long tmLastSentReceived=0;
+long tmLastSentReceived = 0;
 struct timeval tvNow;
 struct timeval tvSelectTimeout;
 
-
-
 /** all t_TIME in units of us */
 t_TIME time0;
-t_TIME SleepUntil=0;
-t_TIME time_v_changed=0;
+t_TIME SleepUntil = 0;
+t_TIME time_v_changed = 0;
 
 int quiet = 0;
 
-int RecentDIN = -1; // -1 to force refresh on start
+int RecentDIN = -1;  // -1 to force refresh on start
 int RecentDOUT = 0;
 
 /** return time in "ticks", not used */
@@ -166,20 +152,17 @@ int RecentDOUT = 0;
 
 /** microseconds, 32 bit, will wrap around, use only for relative comparison ! */
 
-t_TIME tnow=0;
+t_TIME tnow = 0;
 /** return time in us from unspecified origin and update tnow */
 t_TIME gettime() {
-	gettimeofday(&tvNow,NULL);
-	return ( tnow = tvNow.tv_sec*1000000 + tvNow.tv_usec);
+  gettimeofday(&tvNow, NULL);
+  return (tnow = tvNow.tv_sec * 1000000 + tvNow.tv_usec);
 }
 
-
-
-void die(char * str) {
-	fprintf(stderr,"exiting: %s, errno %d\n", str, errno);
-	exit(10);
+void die(char *str) {
+  fprintf(stderr, "exiting: %s, errno %d\n", str, errno);
+  exit(10);
 }
-
 
 class t_CHANNELS;
 
@@ -264,8 +247,6 @@ t_CHANNELS ParseChannel(string &chan) {
   }
   return channels;
 }
-
-
 
 /** function based on PwdOutValue from Pwd-Treiber.txt (Pascal).
   @param[in] value resistance in Ohm, negative means open, maximum ::RESI_R_MAX
@@ -436,7 +417,7 @@ void TransitionDIN(int chan, int transition) {
   // send ACK message
   std::ostringstream ack;
   ack << "OK\nINDX " << chan << " " << Index[chan] << "\nSET " << chan << " " << ValCurrent[chan] << "\n\r\n";
-//todo eso  WriteToAll(ack.str(), Linebuffer::F_ECHO_INDX);
+  // todo eso  WriteToAll(ack.str(), Linebuffer::F_ECHO_INDX);
 }
 
 void TransitionMODE(int chan, enum e_MODE mode) {
@@ -484,24 +465,6 @@ void Changed(bool chd) {
   //  }
 }
 
-void DoRST(void) {
-	t_Linebuffer_List::iterator i;
-//todo eso	cerr << "DoRST\nexiting 0\n";
-	if(time_v_changed) {
-//todo eso		WriteConfig();
-//todo eso		SaveConfig(0);
-		Changed(false);
-	}
-
-//todo eso	LcdClear();
-	for(i=streams.begin(); i!=streams.end(); ++i) {
-		close((*i)->m_fd);
-	}
-//todo eso	system("/bin/sync;/sbin/reboot");
-	exit(0);
-}
-
-
 int Clear(t_CHANNELS ch) {
   int ret = -1;
   // if(debug>2)
@@ -529,9 +492,9 @@ int Clear(t_CHANNELS ch) {
   return ret;
 }
 
-//==============================================================================================
+//=====================================================================================================================
 
-//---------------------------------------------------------------------------
+//---------------------------------------------------------------------------------------------------------------------
 /** Initialize this wwresi component
  *
  */
@@ -644,11 +607,9 @@ void WWRESIComponent::setup() {
   //   this->set_system_mode(this->system_mode_);
   //   this->set_config_mode(false);
 
-  // Linebuffer  lb1(static_cast<int>(1));
-
-  streams.push_front(new Linebuffer(static_cast<int>(0), handleCommand));  // fd=1 socket
-
-  // streams.push_front(new Line_Buffer(1, handleCommand));  // fd=1 socket
+  this->streams.push_back(new Linebuffer(static_cast<int>(0)));  // fd=0 uart
+  this->streams.push_back(new Linebuffer(static_cast<int>(1)));  // fd=1 socket
+  this->streams.push_back(new Linebuffer(static_cast<int>(2)));  // fd=2 can
 
   ESP_LOGCONFIG(TAG, "WWRESI setup complete.");
 }
@@ -763,10 +724,10 @@ void WWRESIComponent::readline_(int rx_data, uint8_t *buffer, int len) {
   if (rx_data > 0) {
     // ESP_LOGD(TAG, "rx: %02x", rx_data);
     switch (rx_data) {
-      case '\n':  // Ignore LF 0x0a
+      case '\r':  // Ignore LF 0x0a
         break;
-      case '\r':  // Return on CR 0x0d
-        addCommandToallStreams_(buffer, pos);
+      case '\n':  // Return on CR 0x0d
+        addCommandToStream_(S_UART, buffer, pos);
         pos = 0;  // Reset position index ready for next time
         buffer[pos] = 0;
         break;
@@ -783,16 +744,48 @@ void WWRESIComponent::readline_(int rx_data, uint8_t *buffer, int len) {
 /// @brief convert uint8_t array to string, add to Stringstream append newline
 /// @param buffer
 /// @param len
-void WWRESIComponent::addCommandToallStreams_(uint8_t *buffer, int len) {
-  t_Linebuffer_List::iterator i;
+void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len) {
+  t_Linebuffer_List::iterator it;
   std::string str = "";
 
   // uint8_t array to str
   for (int x = 0; x < len; x++) {
     str = str + ((char *) buffer)[x];
   }
-  for (i = streams.begin(); i != streams.end(); i++) {
-    (*i)->AddData(str + "\n");  // newline is streamend eof()
+  // str to stream
+  it = streams.begin();
+  std::advance(it, streamNr);
+  (*it)->AddData(str + "\n");  // newline have to be streamend befor eof()
+
+  // str to all streams
+  // for (i = streams.begin(); i != streams.end(); i++) {
+  //   (*i)->AddData(str + "\n");  // newline is streamend eof()
+  // }
+
+  //  if ((*it)->Line != "" ){
+  str = (*it)->Line;
+  ESP_LOGD("wwresi", "New cmd  %s to %d %d ", str.c_str(), streamNr, (*it)->m_fd);
+  //  }
+
+  switch (streamNr) {
+    case 0:
+      ESP_LOGD("wwresi", "input stream  %d", streamNr);
+      handleCommand(streamNr, (*it), str);
+      break;
+
+    case 1:
+      ESP_LOGD("wwresi", "input stream  %d", streamNr);
+      handleCommand(streamNr, (*it), str);
+      break;
+
+    case 2:
+      ESP_LOGD("wwresi", "input stream  %d", streamNr);
+      handleCommand(streamNr, (*it), str);
+      break;
+
+    default:
+      ESP_LOGD("wwresi", "Unknown input stream  %d", streamNr);
+      break;
   }
 }
 
@@ -803,17 +796,20 @@ void WWRESIComponent::addCommandToallStreams_(uint8_t *buffer, int len) {
 /// @param stream
 /// @param line
 /// @return
-int WWRESIComponent::handleCommand(class Linebuffer *stream, string &line) {
+int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, string &line) {
+  char unitch = 0;
+  bool do_modul_restart = false;
   std::ostringstream ack;
   unsigned int channels = 0;
   int unit = 1;
-  char unitch = 0;
   char *end_ptr;
   double val;
-  bool do_rst = false;
   int ret;
 
+
+  ESP_LOGD("wwresi", "line  %s", line.c_str());
   transform(line.begin(), line.end(), line.begin(), (int (*)(int)) toupper);
+  ESP_LOGD("wwresi", "line  %s", line.c_str());
   std::istringstream input(line);
   string cmd;
   string chan;
@@ -826,6 +822,9 @@ int WWRESIComponent::handleCommand(class Linebuffer *stream, string &line) {
   if (value != "") {
     unitch = value.end()[-1];
   }
+
+  ESP_LOGD("wwresi", "cmd: %s - chan %s - value %s - unit %c", cmd.c_str(), chan.c_str(), value.c_str(), unitch);
+
 
   //--- set and load command .........................
   if (cmd == "SET" || cmd == "LOAD") {
@@ -1066,7 +1065,7 @@ int WWRESIComponent::handleCommand(class Linebuffer *stream, string &line) {
     ack << "IP " << ValIpAddr << " " << ValIpNetmask << " " << ValIpGateway << "\n";
   } else if (cmd == "RST" || cmd == "QUIT" || cmd == "EXIT") {
     ack << "OK " << stream->m_fd << "\nRST\n";
-    do_rst = true;
+    do_modul_restart = true;
   } else if (cmd == "ECHO") {
     val = strtol(chan.c_str(), &end_ptr, 10);
     ack << "OK " << stream->m_fd << "\nECHO ";
@@ -1108,7 +1107,7 @@ int WWRESIComponent::handleCommand(class Linebuffer *stream, string &line) {
     if (chan != "") {
       int n = atoi(chan.c_str());
       if (n > 0) {
-//todo eso        ret = set_bitrate(can_fd, n);
+        // todo eso        ret = set_bitrate(can_fd, n);
       } else {
         ret = -1;
       }
@@ -1173,8 +1172,8 @@ int WWRESIComponent::handleCommand(class Linebuffer *stream, string &line) {
     // TODO switch to normal ACK mode
 
   } else if (cmd == "SAVE") {
-//todo eso    WriteConfig();
-//todo eso    SaveConfig(0);
+    // todo eso    WriteConfig();
+    // todo eso    SaveConfig(0);
 
     ack << "OK " << stream->m_fd << "\n";
     ack << "SAVE\n";
@@ -1190,17 +1189,17 @@ int WWRESIComponent::handleCommand(class Linebuffer *stream, string &line) {
 error_jump:
   ack << "\r\n";
   //	cerr << ack.str();
-//todo eso ESP_LOGD(TAG, "ack: %s", ack);
+  ESP_LOGD(TAG, "ack: %s", ack.str().c_str());
 
-  // WriteToAll(ack.str(), LineBuffer::F_ECHO_OTHER);
+   Write   ToAll(ack.str(), LineBuffer::F_ECHO_OTHER);
 
   // eso check it
   // // if F_ECHO_OTHER flag is not there, send ACK to this stream anyway
   // if (!(stream->m_flags & LineBuffer::F_ECHO_OTHER)) {
   //   ret = write(stream->m_fd, ack.str().data(), ack.str().length());
 
-  if (do_rst) {
-    DoRST();
+  if (do_modul_restart) {
+    this->send_module_restart();
     // this function will not exit, therefore it is done after ACK is sent
   }
   return 0;
@@ -1231,13 +1230,23 @@ void WWRESIComponent::send_module_restart() { this->wwresi_restart(); }
 
 //---------------------------------------------------------------------------
 void WWRESIComponent::wwresi_restart() {
-  CmdFrameT cmd_frame;
-  // cmd_frame.data_length = 0;
-  // cmd_frame.header = CMD_FRAME_HEADER;
-  // cmd_frame.command = CMD_RESTART;
-  // cmd_frame.footer = CMD_FRAME_FOOTER;
-  ESP_LOGD(TAG, "Sending restart command: %2X", cmd_frame.command);
-  // this->send_cmd_from_array(cmd_frame);
+  t_Linebuffer_List::iterator i;
+  ESP_LOGD(TAG, "Sending restart command");
+
+  if (time_v_changed) {
+    // todo eso		WriteConfig();
+    // todo eso		SaveConfig(0);
+    Changed(false);
+  }
+
+  // todo eso	LcdClear();
+
+  for (i = this->streams.begin(); i != this->streams.end(); ++i) {
+    close((*i)->m_fd);
+  }
+
+  delay(100);  // NOLINT
+  App.safe_reboot();
 }
 
 //---------------------------------------------------------------------------
@@ -1245,14 +1254,14 @@ int WWRESIComponent::get_firmware_int_(const char *version_string) { return 0; }
 
 //---------------------------------------------------------------------------
 void WWRESIComponent::get_firmware_version_() {
-  CmdFrameT cmd_frame;
-  // cmd_frame.data_length = 0;
-  // cmd_frame.header = CMD_FRAME_HEADER;
-  // cmd_frame.command = CMD_READ_VERSION;
-  // cmd_frame.footer = CMD_FRAME_FOOTER;
+  // CmdFrameT cmd_frame;
+  //  cmd_frame.data_length = 0;
+  //  cmd_frame.header = CMD_FRAME_HEADER;
+  //  cmd_frame.command = CMD_READ_VERSION;
+  //  cmd_frame.footer = CMD_FRAME_FOOTER;
 
-  ESP_LOGD(TAG, "Sending read firmware version command: %2X", cmd_frame.command);
-  // this->send_cmd_from_array(cmd_frame);
+  // ESP_LOGD(TAG, "Sending read firmware version command: %2X", cmd_frame.command);
+  //  this->send_cmd_from_array(cmd_frame);
 }
 
 #ifdef USE_NUMBER
