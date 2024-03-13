@@ -18,8 +18,6 @@ typedef std::list<class Linebuffer *> t_Linebuffer_List;
 typedef int t_HANDLER(class Linebuffer *stream, std::string &line);
 
 class Linebuffer : public std::stringstream {
- private: 
-  int debug = 1; 
  public:
   //---------------------------------------------------------------------------
   Linebuffer(int fd) {
@@ -40,6 +38,7 @@ class Linebuffer : public std::stringstream {
   ~Linebuffer() {}
 
 
+  int debug = 0; //1; 
   std::string Line = "";
   enum bufstate { EMPTY, COMPLETE, INCOMPLETE };
   enum flags { F_ECHO_DIN = 1, F_ECHO_OTHER = 2, F_ECHO_INDX = 4, F_ECHO_DEF = 0 };
@@ -59,7 +58,7 @@ class Linebuffer : public std::stringstream {
   /// @return 
   int ProcessData(t_HANDLER *handler) {
     int cnt = 0;
-    if (debug > 1) {
+    if (debug) {
       ESP_LOGD("wwresi", "cnt_b  PD  %d", cnt);
     }
     if (handler == NULL) {
@@ -72,14 +71,14 @@ class Linebuffer : public std::stringstream {
 
     while (GetData(line) == COMPLETE) {
       cnt++;
-      if (debug > 1) {
+      if (debug) {
         ESP_LOGD("wwresi", "data: PD0  %s", line.c_str());
       }
       Line = line;
       if (handler)
         handler(this, line);
     }
-    if (debug > 1) {
+    if (debug) {
       ESP_LOGD("wwresi", "cnt_e  PDx  %d - line %s", cnt, Line.c_str());
     }
     return cnt;
@@ -108,20 +107,20 @@ class Linebuffer : public std::stringstream {
         // put back first characters of incoming not complete line
         //*this << line;
         write(line.data(), line.size());
-        if (debug > 1) {
+        if (debug) {
           ESP_LOGD("wwresi", "data: GD12  %s", "INCOMPLETE");
         }
         line = "";
         return INCOMPLETE;
       }
-      if (debug > 1) {
+      if (debug) {
         ESP_LOGD("wwresi", "data: GD13  %s", "COMPLETE");
       }
       return COMPLETE;
     }
     clear();  // reset error (eof) status
     str("");  // free internal buffer
-    if (debug > 1) {
+    if (debug) {
       ESP_LOGD("wwresi", "data: GD2  %s", "EMPTY");
     }
     line = "";

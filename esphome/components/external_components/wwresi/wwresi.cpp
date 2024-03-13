@@ -16,9 +16,7 @@ namespace wwresi {
 
 char version[] = "RESI MR01 V0.1";
 
-
 //============================================================================================================
-
 
 #define TRUE true
 #define FALSE false
@@ -39,7 +37,7 @@ char version[] = "RESI MR01 V0.1";
 
 #define RESOLUTION 1  // for resolution 1 -> 0x81 for resolution 10 -> 0x91 (Formel in der Spezifikation)
 
-//int debug = 0;
+// int debug = 0;
 int watchdog = 0;
 
 unsigned long brid = BROAD_CAN_RID;
@@ -60,9 +58,9 @@ unsigned int can_bitrate = 500;
 
 typedef int t_TIME;
 
-enum e_resi_type { RESI_T_K = 0, RESI_T_M = 1 };
+enum e_resi_type { RESI_T_K = 0, RESI_T_M = 1, RESI_T_KM = 2 };
 
-int ResiType = RESI_T_M;
+int ResiType = RESI_T_KM;
 
 enum { RESI_DOUT_MAX = 15 };
 
@@ -363,8 +361,6 @@ void SetDOUT(unsigned long val) {
   // RefreshLcdDOUT();
 }
 
-
-
 void TransitionDIN(int chan, int transition) {
   if (Mode[chan] != LOCAL) {
     return;
@@ -394,7 +390,7 @@ void TransitionDIN(int chan, int transition) {
   // send ACK message
   std::ostringstream ack;
   ack << "OK\nINDX " << chan << " " << Index[chan] << "\nSET " << chan << " " << ValCurrent[chan] << "\n\r\n";
-//todo eso  writeToAll(ack.str(), Linebuffer::F_ECHO_INDX);
+  // todo eso  writeToAll(ack.str(), Linebuffer::F_ECHO_INDX);
 }
 
 void TransitionMODE(int chan, enum e_MODE mode) {
@@ -678,15 +674,13 @@ void WWRESIComponent::revert_config_action() {
 void WWRESIComponent::loop() {
   get_cmd_new();
   get_read_DIN();
-
 }
 
 //---------------------------------------------------------------------------
 /// @brief read new command from interfaces uart,eth,can
-void WWRESIComponent::get_cmd_new(){
+void WWRESIComponent::get_cmd_new() {
   // If there is a active send command do not process it here, the send command call will handle it.
   if (!get_cmd_active_()) {
-
     // uart data input
     if (!available())
       return;
@@ -702,24 +696,23 @@ void WWRESIComponent::get_cmd_new(){
 
     // can data input
     // todo eso
-
-  } 
- }
+  }
+}
 
 //---------------------------------------------------------------------------
 /// @brief read new DIN from digital inputs
 void WWRESIComponent::get_read_DIN() {
   int ret;
   std::ostringstream ack;
-  //todo eso  ret = PortRead(RESIC_INS);
-  // bits [3:0] digital inputs, bit 7 is F_USB_PWR_ON and works, is masked below
-  if(ret ==  RecentDIN) {
-  	return;
+  // todo eso  ret = PortRead(RESIC_INS);
+  //  bits [3:0] digital inputs, bit 7 is F_USB_PWR_ON and works, is masked below
+  if (ret == RecentDIN) {
+    return;
   }
   ack << "OK\nGET DIN " << (ret & DIN_MASK) << "\n\r\n";
   writeToAll(ack.str(), Linebuffer::F_ECHO_DIN);
   ValCurrent[CH_DIN] = RecentDIN = ret;
-  //todo eso RefreshLcdDIN();
+  // todo eso RefreshLcdDIN();
 }
 
 //---------------------------------------------------------------------------
@@ -767,26 +760,36 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
   (*it)->AddData(str + "\n");  // newline have to be streamend befor eof()
 
   str = (*it)->Line;
-  ESP_LOGD("wwresi", "new cmd  %s to %d %d ", str.c_str(), streamNr, (*it)->m_fd);
+  if (debug) {
+    ESP_LOGD("wwresi", "new cmd  %s to %d %d ", str.c_str(), streamNr, (*it)->m_fd);
+  }
 
   switch (streamNr) {
     case 0:
-      ESP_LOGD("wwresi", "input stream  %d", streamNr);
+      if (debug) {
+        ESP_LOGD("wwresi", "input stream  %d", streamNr);
+      }
       handleCommand(streamNr, (*it), str);
       break;
 
     case 1:
-      ESP_LOGD("wwresi", "input stream  %d", streamNr);
+      if (debug) {
+        ESP_LOGD("wwresi", "input stream  %d", streamNr);
+      }
       handleCommand(streamNr, (*it), str);
       break;
 
     case 2:
-      ESP_LOGD("wwresi", "input stream  %d", streamNr);
+      if (debug) {
+        ESP_LOGD("wwresi", "input stream  %d", streamNr);
+      }
       handleCommand(streamNr, (*it), str);
       break;
 
     default:
-      ESP_LOGD("wwresi", "Unknown input stream  %d", streamNr);
+      if (debug) {
+        ESP_LOGD("wwresi", "Unknown input stream  %d", streamNr);
+      }
       break;
   }
 }
@@ -799,7 +802,7 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
 /// @param line
 /// @return
 int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, string &line) {
-  char unitch = 0;
+  char unitch = ' ';
   bool do_modul_restart = false;
   std::ostringstream ack;
   unsigned int channels = 0;
@@ -819,12 +822,13 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
   input >> value;
   // last char is maybe value unit like Kilo or Mega
   if (value != "") {
-    unitch = value.end()[-1];
+    if (!isdigit(value.end()[-1])) {
+      unitch = value.end()[-1];
+    }
   }
-
-  ESP_LOGD("wwresi", "cmd: %s - chan %s - value %s - unit %c", cmd.c_str(), chan.c_str(), value.c_str(), unitch);
-
-
+  if (debug) {
+    ESP_LOGD("wwresi", "cmd: %s - chan %s - value %s - unit %c", cmd.c_str(), chan.c_str(), value.c_str(), unitch);
+  }
   //--- set and load command .........................
   if (cmd == "SET" || cmd == "LOAD") {
     channels = ParseChannel(chan);
@@ -845,7 +849,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
           unit = 1000;
         } else if (unitch == 'M') {
           unit = 1000000;
-        } else if (isdigit(unitch)) {
+        } else if (unitch == ' ') {
           unit = 1;
           unitch = 'D';
         } else {
@@ -854,7 +858,22 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
           goto error_jump;
         }
         val = strtod(value.c_str(), &end_ptr) * unit;
-        if (ResiType & RESI_T_M) {
+        if (debug) {
+          ESP_LOGD("wwresi", "val %f - value %s - unit %c", val, value.c_str(), unit);
+        }
+        if (ResiType & RESI_T_KM) {
+          if (val < 0.0) {
+            if (val < -1.0001 || val > -0.9999) {
+              ack << "ERR " << stream->m_fd << " wrong value\n";
+              ack << line << "\n";
+              goto error_jump;
+            }
+          } else if (val < -1.0001 || val > RESI_R_MAX_M + 0.0001 || fabs(round(val) - val) > 0.0001) {
+            ack << "ERR " << stream->m_fd << " wrong value\n";
+            ack << line << "\n";
+            goto error_jump;
+          }
+        } else if (ResiType & RESI_T_M) {
           if (val < 0.0) {
             if (val < -1.0001 || val > -0.9999) {
               ack << "ERR " << stream->m_fd << " wrong value\n";
@@ -1100,7 +1119,6 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     }
     ack << "OK " << stream->m_fd << "\n";
     ack << "CFRAME " << (ext ? "29" : "11") << "\n";
-
   } else if (cmd == "CBAUDRATE") {
     int ret;
     if (chan != "") {
@@ -1163,13 +1181,10 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     ack << "CTID " << tid << "\n";
   } else if (cmd == "VERSION") {
     // ignore
-
   } else if (cmd == "CONFIG") {
     // TODO switch to quiet (no-ack) mode
-
   } else if (cmd == "END") {
     // TODO switch to normal ACK mode
-
   } else if (cmd == "SAVE") {
     // todo eso    WriteConfig();
     // todo eso    SaveConfig(0);
@@ -1188,7 +1203,9 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
 error_jump:
   ack << "\r\n";
   //	cerr << ack.str();
-  ESP_LOGD(TAG, "ack: %s", ack.str().c_str());
+  if (debug) {
+    ESP_LOGD(TAG, "ack: %s", ack.str().c_str());
+  }
 
   writeToAll(ack.str(), Linebuffer::F_ECHO_OTHER);
 
@@ -1210,18 +1227,18 @@ error_jump:
 void WWRESIComponent::writeToAll(const string &str, Linebuffer::flags dest) {
   t_Linebuffer_List::iterator i;
   for (i = streams.begin(); i != streams.end(); ++i) {
-    //if ((*i)->m_flags & dest) {
-      switch ((*i)->m_fd) {
-        case 0:  // uart
-          // code
-          write_str((str.data()));
-          break;
+    // if ((*i)->m_flags & dest) {
+    switch ((*i)->m_fd) {
+      case 0:  // uart
+        // code
+        write_str((str.data()));
+        break;
 
-        default:
-          break;
-      }
+      default:
+        break;
+    }
 
-      //////  write((*i)->m_fd, str.data(), str.length());
+    //////  write((*i)->m_fd, str.data(), str.length());
     //}
   }
 }
