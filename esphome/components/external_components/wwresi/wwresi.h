@@ -66,6 +66,7 @@ static const int S_UART = 0;
 static const int S_NET = 1;
 static const int S_CAN = 2;
 
+
 //int fdUdp;
 //int fdError;
 //int fdIn;
@@ -246,6 +247,8 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 //   void set_presence_(bool presence) { this->presence_ = presence; };
 //   uint16_t get_distance_() { return this->distance_; };
 //   void set_distance_(uint16_t distance) { this->distance_ = distance; };
+   void get_cmd_new();
+   void get_read_DIN();
    bool get_cmd_active_() { return this->cmd_active_; };
    void set_cmd_active_(bool active) { this->cmd_active_ = active; };
 //   void handle_simple_mode_(const uint8_t *inbuf, int len);
@@ -258,7 +261,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 
    int handleCommand(int streamNr, class Linebuffer *stream, string &line);
 
-   //void writeToAll(const string & str, Line_Buffer::flags dest);
+   void writeToAll(const string & str, Linebuffer::flags dest);
 
 
 

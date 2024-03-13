@@ -1,9 +1,11 @@
 
-#include "wwresi.h"
 #include <unistd.h>
 #include <list>
 #include <algorithm>
 #include "esphome/core/application.h"
+
+#include "linebuffer.h"
+#include "wwresi.h"
 
 using std::string;
 
@@ -14,30 +16,17 @@ namespace wwresi {
 
 char version[] = "RESI MR01 V0.1";
 
-t_Linebuffer_List streams;
-
-/* void WriteToAll(const string & str, Linebuffer::flags dest) {
-  t_STREAM_LIST::iterator i;
-  for(i=streams.begin(); i!=streams.end(); ++i) {
-    if((*i)->m_flags & dest) {
-      write((*i)->m_fd, str.data(), str.length());
-    }
-  }
-}
- */
 
 //============================================================================================================
 
-#define DIN_MASK 0xf
 
 #define TRUE true
 #define FALSE false
-#define SERIAL_DEV "/dev/ttyS1"
 //=================================================CAN
-#define ACK_FIND 0x10
-#define ACK_GET 0x13
-#define ACK_TYPE 0x18
-#define ACK_CAN 0x1f  // for the rest of can-cmd.
+// #define ACK_FIND 0x10
+// #define ACK_GET 0x13
+// #define ACK_TYPE 0x18
+// #define ACK_CAN 0x1f  // for the rest of can-cmd.
 
 // for broadcasting
 #define BROAD_CAN_RID 100
@@ -45,12 +34,12 @@ t_Linebuffer_List streams;
 // RESI-Serialnumber
 #define SN 1234
 // RESI-TYP
-#define TYP 0x2
+// #define TYP 0x2
 #define DIN_MASK 0xf
 
 #define RESOLUTION 1  // for resolution 1 -> 0x81 for resolution 10 -> 0x91 (Formel in der Spezifikation)
 
-int debug = 0;
+//int debug = 0;
 int watchdog = 0;
 
 unsigned long brid = BROAD_CAN_RID;
@@ -60,7 +49,7 @@ unsigned long rid = 100;
 unsigned long tid = 101;
 unsigned long serialnr = SN;
 unsigned long serial_pcb = 0;
-// Typ
+
 // can mesg. ext
 unsigned int ext = 0;
 unsigned int can_identifier = (1 << 11) - 1;  // std. 536870911 (29 bits) or 2047(11 bits)
@@ -374,19 +363,7 @@ void SetDOUT(unsigned long val) {
   // RefreshLcdDOUT();
 }
 
-void ReadDIN(void) {
-  // int ret;
-  std::ostringstream ack;
-  // ret = PortRead(RESIC_INS);
-  // // bits [3:0] digital inputs, bit 7 is F_USB_PWR_ON and works, is masked below
-  // if(ret ==  RecentDIN) {
-  // 	return;
-  // }
-  // ack << "OK\nGET DIN " << (ret & DIN_MASK) << "\n\r\n";
-  // WriteToAll(ack.str(), LineBuffer::F_ECHO_DIN);
-  // ValCurrent[CH_DIN] = RecentDIN = ret;
-  // RefreshLcdDIN();
-}
+
 
 void TransitionDIN(int chan, int transition) {
   if (Mode[chan] != LOCAL) {
@@ -417,7 +394,7 @@ void TransitionDIN(int chan, int transition) {
   // send ACK message
   std::ostringstream ack;
   ack << "OK\nINDX " << chan << " " << Index[chan] << "\nSET " << chan << " " << ValCurrent[chan] << "\n\r\n";
-  // todo eso  WriteToAll(ack.str(), Linebuffer::F_ECHO_INDX);
+//todo eso  writeToAll(ack.str(), Linebuffer::F_ECHO_INDX);
 }
 
 void TransitionMODE(int chan, enum e_MODE mode) {
@@ -699,8 +676,17 @@ void WWRESIComponent::revert_config_action() {
  * Defaults to doing nothing.
  */
 void WWRESIComponent::loop() {
+  get_cmd_new();
+  get_read_DIN();
+
+}
+
+//---------------------------------------------------------------------------
+/// @brief read new command from interfaces uart,eth,can
+void WWRESIComponent::get_cmd_new(){
   // If there is a active send command do not process it here, the send command call will handle it.
   if (!get_cmd_active_()) {
+
     // uart data input
     if (!available())
       return;
@@ -710,7 +696,30 @@ void WWRESIComponent::loop() {
       rx_data = this->read();
       this->readline_(rx_data, buffer, sizeof(buffer));
     }
+
+    // eth data input
+    // todo eso
+
+    // can data input
+    // todo eso
+
+  } 
+ }
+
+//---------------------------------------------------------------------------
+/// @brief read new DIN from digital inputs
+void WWRESIComponent::get_read_DIN() {
+  int ret;
+  std::ostringstream ack;
+  //todo eso  ret = PortRead(RESIC_INS);
+  // bits [3:0] digital inputs, bit 7 is F_USB_PWR_ON and works, is masked below
+  if(ret ==  RecentDIN) {
+  	return;
   }
+  ack << "OK\nGET DIN " << (ret & DIN_MASK) << "\n\r\n";
+  writeToAll(ack.str(), Linebuffer::F_ECHO_DIN);
+  ValCurrent[CH_DIN] = RecentDIN = ret;
+  //todo eso RefreshLcdDIN();
 }
 
 //---------------------------------------------------------------------------
@@ -741,7 +750,7 @@ void WWRESIComponent::readline_(int rx_data, uint8_t *buffer, int len) {
 }
 
 //---------------------------------------------------------------------------
-/// @brief convert uint8_t array to string, add to Stringstream append newline
+/// @brief convert uint8_t array to string, add to Stringstream append newline, call handleCommand
 /// @param buffer
 /// @param len
 void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len) {
@@ -757,15 +766,8 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
   std::advance(it, streamNr);
   (*it)->AddData(str + "\n");  // newline have to be streamend befor eof()
 
-  // str to all streams
-  // for (i = streams.begin(); i != streams.end(); i++) {
-  //   (*i)->AddData(str + "\n");  // newline is streamend eof()
-  // }
-
-  //  if ((*it)->Line != "" ){
   str = (*it)->Line;
-  ESP_LOGD("wwresi", "New cmd  %s to %d %d ", str.c_str(), streamNr, (*it)->m_fd);
-  //  }
+  ESP_LOGD("wwresi", "new cmd  %s to %d %d ", str.c_str(), streamNr, (*it)->m_fd);
 
   switch (streamNr) {
     case 0:
@@ -792,7 +794,7 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
 //==========================================================================================================
 
 //---------------------------------------------------------------------------
-/// @brief run command called from linebuffer
+/// @brief run command called from Linebuffer
 /// @param stream
 /// @param line
 /// @return
@@ -806,10 +808,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
   double val;
   int ret;
 
-
-  ESP_LOGD("wwresi", "line  %s", line.c_str());
   transform(line.begin(), line.end(), line.begin(), (int (*)(int)) toupper);
-  ESP_LOGD("wwresi", "line  %s", line.c_str());
   std::istringstream input(line);
   string cmd;
   string chan;
@@ -1191,12 +1190,15 @@ error_jump:
   //	cerr << ack.str();
   ESP_LOGD(TAG, "ack: %s", ack.str().c_str());
 
-   Write   ToAll(ack.str(), LineBuffer::F_ECHO_OTHER);
+  writeToAll(ack.str(), Linebuffer::F_ECHO_OTHER);
 
-  // eso check it
+  // eso check it ??????
+
   // // if F_ECHO_OTHER flag is not there, send ACK to this stream anyway
-  // if (!(stream->m_flags & LineBuffer::F_ECHO_OTHER)) {
+  // if (!(stream->m_flags & Linebuffer::F_ECHO_OTHER)) {
   //   ret = write(stream->m_fd, ack.str().data(), ack.str().length());
+
+  // eso check it ??????
 
   if (do_modul_restart) {
     this->send_module_restart();
@@ -1205,24 +1207,24 @@ error_jump:
   return 0;
 }
 
-// void WWRESIComponent::writeToAll(const string &str, Line_Buffer::flags dest) {
-//   t_Line_Buffer_List::iterator i;
-//   for (i = streams.begin(); i != streams.end(); ++i) {
-//     if ((*i)->m_flags & dest) {
-//       switch ((*i)->m_fd) {
-//         case 0:  // uart
-//                  // code
-//           write_str((str.data()));
-//           break;
+void WWRESIComponent::writeToAll(const string &str, Linebuffer::flags dest) {
+  t_Linebuffer_List::iterator i;
+  for (i = streams.begin(); i != streams.end(); ++i) {
+    //if ((*i)->m_flags & dest) {
+      switch ((*i)->m_fd) {
+        case 0:  // uart
+          // code
+          write_str((str.data()));
+          break;
 
-//         default:
-//           break;
-//       }
+        default:
+          break;
+      }
 
-//       //////  write((*i)->m_fd, str.data(), str.length());
-//     }
-//   }
-// }
+      //////  write((*i)->m_fd, str.data(), str.length());
+    //}
+  }
+}
 
 //---------------------------------------------------------------------------
 // Sends a restart and set system running mode to normal

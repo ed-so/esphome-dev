@@ -8,7 +8,7 @@
 
 #include "esphome/core/defines.h"
 
-#include "wwresi.h"
+//#include "wwresi.h"
 
 namespace esphome {
 namespace wwresi {
@@ -18,34 +18,50 @@ typedef std::list<class Linebuffer *> t_Linebuffer_List;
 typedef int t_HANDLER(class Linebuffer *stream, std::string &line);
 
 class Linebuffer : public std::stringstream {
+ private: 
+  int debug = 1; 
  public:
+  //---------------------------------------------------------------------------
   Linebuffer(int fd) {
     m_fd = fd;
     m_handler = NULL;
-    m_flags = F_DEF;
+    m_flags = F_ECHO_DEF;
   }
 
+  //---------------------------------------------------------------------------
   Linebuffer(int fd, t_HANDLER *handler) {
     m_fd = fd;
     m_handler = handler;
-    m_flags = F_DEF;
+    m_flags = F_ECHO_DEF;
   }
 
+  //---------------------------------------------------------------------------
+  /// @brief destructor
   ~Linebuffer() {}
 
-  enum bufstate { EMPTY, COMPLETE, INCOMPLETE };
-  enum flags { F_ECHO_DIN = 1, F_ECHO_OTHER = 2, F_ECHO_INDX = 4, F_DEF = 0 };
 
+  std::string Line = "";
+  enum bufstate { EMPTY, COMPLETE, INCOMPLETE };
+  enum flags { F_ECHO_DIN = 1, F_ECHO_OTHER = 2, F_ECHO_INDX = 4, F_ECHO_DEF = 0 };
+
+  //---------------------------------------------------------------------------
+  /// @brief add string to stream and call Process....
+  /// @param data 
   void AddData(const std::string data) {
     *this << (data.c_str());
     ProcessData(NULL);
   }
 
-  std::string Line = "";
 
+  //---------------------------------------------------------------------------
+  /// @brief if data complete call handler
+  /// @param handler 
+  /// @return 
   int ProcessData(t_HANDLER *handler) {
     int cnt = 0;
-    ESP_LOGD("wwresi", "cnt_b  PD  %d", cnt);
+    if (debug > 1) {
+      ESP_LOGD("wwresi", "cnt_b  PD  %d", cnt);
+    }
     if (handler == NULL) {
       handler = m_handler;
     }
@@ -56,19 +72,19 @@ class Linebuffer : public std::stringstream {
 
     while (GetData(line) == COMPLETE) {
       cnt++;
-      ESP_LOGD("wwresi", "data: PD0  %s", line.c_str());
+      if (debug > 1) {
+        ESP_LOGD("wwresi", "data: PD0  %s", line.c_str());
+      }
       Line = line;
       if (handler)
         handler(this, line);
     }
-    ESP_LOGD("wwresi", "cnt_e  PDx  %d - line %s", cnt, Line.c_str());
+    if (debug > 1) {
+      ESP_LOGD("wwresi", "cnt_e  PDx  %d - line %s", cnt, Line.c_str());
+    }
     return cnt;
   }
 
-  // void virtual AddData(const char *data);
-  // int virtual ProcessData(t_HANDLER handler = NULL);
-
-  // enum bufstate GetData(std::string &line);
   /** get complete lines out of the buffer.
     every time this function returns EMPTY or INCOMPLETE internal buffer
     is guaranteed to be freed. This combined with while(GetData(line) == COMPLETE)
@@ -82,7 +98,9 @@ class Linebuffer : public std::stringstream {
     // ESP_LOGD("wwresi", "data: GD1  %s", line.c_str());
 
     if (std::getline(*this, line)) {
-      ESP_LOGD("wwresi", "data: GD11  %s", line.c_str());
+      if (debug > 1) {
+        ESP_LOGD("wwresi", "data: GD11  %s", line.c_str());
+      }
       if (eof()) {
         // new line character not present, line was not complete, return it to the buffer
         clear();  // reset error (eof) status
@@ -90,16 +108,22 @@ class Linebuffer : public std::stringstream {
         // put back first characters of incoming not complete line
         //*this << line;
         write(line.data(), line.size());
-        ESP_LOGD("wwresi", "data: GD12  %s", "INCOMPLETE");
+        if (debug > 1) {
+          ESP_LOGD("wwresi", "data: GD12  %s", "INCOMPLETE");
+        }
         line = "";
         return INCOMPLETE;
       }
-      ESP_LOGD("wwresi", "data: GD13  %s", "COMPLETE");
+      if (debug > 1) {
+        ESP_LOGD("wwresi", "data: GD13  %s", "COMPLETE");
+      }
       return COMPLETE;
     }
     clear();  // reset error (eof) status
     str("");  // free internal buffer
-    ESP_LOGD("wwresi", "data: GD2  %s", "EMPTY");
+    if (debug > 1) {
+      ESP_LOGD("wwresi", "data: GD2  %s", "EMPTY");
+    }
     line = "";
     return EMPTY;
   }
