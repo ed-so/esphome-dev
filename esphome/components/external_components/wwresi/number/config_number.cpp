@@ -12,14 +12,14 @@ void WWRESITimeoutNumber::control(float timeout) {
   this->parent_->new_config.timeout = timeout;
 }
 
-// void WWRESIMinDistanceNumber::control(float min_gate) {
-//   if ((uint16_t) min_gate > this->parent_->new_config.max_gate) {
-//     min_gate = this->parent_->get_min_distance_value();
-//   } else {
-//     this->parent_->new_config.min_gate = (uint16_t) min_gate;
-//   }
-//   this->publish_state(min_gate);
-// }
+void WWRESIResistanceNumber::control(float value) {
+  if ((int) value > this->parent_->new_config.resistance) {
+    value = this->parent_->get_resistance_value();
+  } else {
+    this->parent_->new_config.resistance = (int) value;
+  }
+  this->publish_state(value);
+}
 
 // void WWRESIMaxDistanceNumber::control(float max_gate) {
 //   if ((uint16_t) max_gate < this->parent_->new_config.min_gate) {

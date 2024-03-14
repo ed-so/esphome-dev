@@ -14,12 +14,12 @@ class WWRESITimeoutNumber : public number::Number, public Parented<WWRESICompone
   void control(float timeout) override;
 };
 
-class WWRESIMinDistanceNumber : public number::Number, public Parented<WWRESIComponent> {
+class WWRESIResistanceNumber : public number::Number, public Parented<WWRESIComponent> {
  public:
-  WWRESIMinDistanceNumber() = default;
+  WWRESIResistanceNumber() = default;
 
  protected:
-  void control(float min_gate) override;
+  void control(float value) override;
 };
 
 // class WW_MR01GateSelectNumber : public number::Number, public Parented<WWRESIComponent> {

@@ -51,6 +51,8 @@ static const char *const TAG = "wwresi";
 
 static const uint8_t WW_MR01_TOTAL_GATES = 16;
 static const uint16_t FACTORY_TIMEOUT = 120;
+static const int FACTORY_RESISTANCE = -1;
+
 
 static const int CALIBRATE_VERSION_MIN = 154;
 
@@ -109,26 +111,38 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 #ifdef USE_NUMBER
   void set_timeout_number(number::Number *number) { this->timeout_number_ = number; };
   //   void set_gate_select_number(number::Number *number) { this->gate_select_number_ = number; };
-  //   void set_min_distance_number(number::Number *number) { this->min_distance_number_ = number; };
-  //   void set_max_distance_number(number::Number *number) { this->max_distance_number_ = number; };
-  //   void set_gate_move_sensitivity_factor_number(number::Number *number) {
-  //     this->gate_move_sensitivity_factor_number_ = number;
-  //   };
-  //   void set_gate_still_sensitivity_factor_number(number::Number *number) {
-  //     this->gate_still_sensitivity_factor_number_ = number;
-  //   };
-  //   void set_gate_still_threshold_numbers(int gate, number::Number *n) { this->gate_still_threshold_numbers_[gate] =
-  //   n; }; void set_gate_move_threshold_numbers(int gate, number::Number *n) {
-  //   this->gate_move_threshold_numbers_[gate] = n; }; bool is_gate_select() { return gate_select_number_ != nullptr;
-  //   }; uint8_t get_gate_select_value() { return static_cast<uint8_t>(this->gate_select_number_->state); }; float
-  //   get_min_distance_value() { return min_distance_number_->state; }; float get_max_distance_value() { return
-  //   max_distance_number_->state; }; void publish_gate_move_threshold(uint8_t gate) {
-  //     // With gate_select we only use 1 number pointer, thus we hard code [0]
-  //     this->gate_move_threshold_numbers_[0]->publish_state(this->new_config.move_thresh[gate]);
-  //   };
-  //   void publish_gate_still_threshold(uint8_t gate) {
-  //     this->gate_still_threshold_numbers_[0]->publish_state(this->new_config.still_thresh[gate]);
-  //   };
+  void set_resistance_number(number::Number *number) { this->resistance_number_ = number; };
+
+
+    // void set_max_distance_number(number::Number *number) { this->max_distance_number_ = number; };
+    // void set_gate_move_sensitivity_factor_number(number::Number *number) {
+    //   this->gate_move_sensitivity_factor_number_ = number;
+    // };
+    // void set_gate_still_sensitivity_factor_number(number::Number *number) {
+    //   this->gate_still_sensitivity_factor_number_ = number;
+    // };
+    // void set_gate_still_threshold_numbers(int gate, number::Number *n) { 
+    //   this->gate_still_threshold_numbers_[gate] = n; 
+    //   };
+    //    void set_gate_move_threshold_numbers(int gate, number::Number *n) {
+    // this->gate_move_threshold_numbers_[gate] = n; 
+    // }; 
+    // bool is_gate_select() {
+    //    return gate_select_number_ != nullptr;
+    // }; 
+    // uint8_t get_gate_select_value() { return static_cast<uint8_t>(this->gate_select_number_->state); }; 
+
+    int  get_resistance_value() { return resistance_number_->state; }; 
+
+    // float get_max_distance_value() { return  max_distance_number_->state; }; 
+    // void publish_gate_move_threshold(uint8_t gate) {
+    //   // With gate_select we only use 1 number pointer, thus we hard code [0]
+    //   this->gate_move_threshold_numbers_[0]->publish_state(this->new_config.move_thresh[gate]);
+    // };
+    // void publish_gate_still_threshold(uint8_t gate) {
+    //   this->gate_still_threshold_numbers_[0]->publish_state(this->new_config.still_thresh[gate]);
+    // };
+
   void init_config_numbers();
   void refresh_config_numbers();
 #endif
@@ -152,7 +166,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   //  };
 
   struct RegConfigT {
-    uint16_t min_gate{0};
+    int resistance{0};
     uint16_t max_gate{0};
     uint16_t timeout{0};
     //   uint32_t move_thresh[WW_MR01_TOTAL_GATES];
@@ -255,7 +269,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 #ifdef USE_NUMBER
   number::Number *timeout_number_{nullptr};
   //   number::Number *gate_select_number_{nullptr};
-  //   number::Number *min_distance_number_{nullptr};
+  number::Number *resistance_number_{nullptr};
   //   number::Number *max_distance_number_{nullptr};
   //   number::Number *gate_move_sensitivity_factor_number_{nullptr};
   //   number::Number *gate_still_sensitivity_factor_number_{nullptr};

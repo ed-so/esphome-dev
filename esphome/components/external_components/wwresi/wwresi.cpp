@@ -69,7 +69,7 @@ enum {
   RESI_R_MAX = 266665,
   RESI_DECADE_SINGLE_RESISTOR = 200000,
   RESI_DECADE_MULT_FACT = 10000,
-  RESI_R_MAX_M = 2666650,
+  RESI_R_MAX_M = 2666665,
   RESI_DECADE_SINGLE_RESISTOR_M = 2000000,
   RESI_DECADE_MULT_FACT_M = 100000,
   RESI_RELAYS_BITS = 20,
@@ -506,7 +506,7 @@ void WWRESIComponent::dump_config() {
 #ifdef USE_NUMBER
   LOG_NUMBER(TAG, "  Timeout:", this->timeout_number_);
   // LOG_NUMBER(TAG, "  Gate Max Distance:", this->max_gate_distance_number_);
-  // LOG_NUMBER(TAG, "  Gate Min Distance:", this->min_gate_distance_number_);
+  LOG_NUMBER(TAG, "  Resistance:", this->resistance_number_);
   // LOG_NUMBER(TAG, "  Gate Select:", this->gate_select_number_);
   // for (uint8_t gate = 0; gate < LD2420_TOTAL_GATES; gate++) {
   //   LOG_NUMBER(TAG, "  Gate Move Threshold:", this->gate_move_threshold_numbers_[gate]);
@@ -626,7 +626,7 @@ void WWRESIComponent::factory_reset_action() {
   // this->set_min_max_distances_timeout(FACTORY_MAX_GATE, FACTORY_MIN_GATE, FACTORY_TIMEOUT);
 #ifdef USE_NUMBER
   this->timeout_number_->state = FACTORY_TIMEOUT;
-  // this->min_gate_distance_number_->state = FACTORY_MIN_GATE;
+  this->resistance_number_->state = FACTORY_RESISTANCE;
   // this->max_gate_distance_number_->state = FACTORY_MAX_GATE;
 #endif
   // for (uint8_t gate = 0; gate < LD2420_TOTAL_GATES; gate++) {
@@ -761,28 +761,23 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
 
   str = (*it)->Line;
   if (debug) {
-    ESP_LOGD("wwresi", "new cmd  %s to %d %d ", str.c_str(), streamNr, (*it)->m_fd);
+    ESP_LOGD("wwresi", "new cmd  %s from %d", str.c_str(), streamNr);
+  }
+
+  if (str.length() == 0){    
+    return;
   }
 
   switch (streamNr) {
     case 0:
-      if (debug) {
-        ESP_LOGD("wwresi", "input stream  %d", streamNr);
-      }
       handleCommand(streamNr, (*it), str);
       break;
 
     case 1:
-      if (debug) {
-        ESP_LOGD("wwresi", "input stream  %d", streamNr);
-      }
       handleCommand(streamNr, (*it), str);
       break;
 
     case 2:
-      if (debug) {
-        ESP_LOGD("wwresi", "input stream  %d", streamNr);
-      }
       handleCommand(streamNr, (*it), str);
       break;
 
@@ -859,7 +854,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
         }
         val = strtod(value.c_str(), &end_ptr) * unit;
         if (debug) {
-          ESP_LOGD("wwresi", "val %f - value %s - unit %c", val, value.c_str(), unit);
+          ESP_LOGD("wwresi", "val %.0f - value %s - unit %c", val, value.c_str(), unitch);
         }
         if (ResiType & RESI_T_KM) {
           if (val < 0.0) {
@@ -1290,8 +1285,8 @@ void WWRESIComponent::init_config_numbers() {
     this->timeout_number_->publish_state(static_cast<uint16_t>(this->current_config.timeout));
   // if (this->gate_select_number_ != nullptr)
   //   this->gate_select_number_->publish_state(0);
-  // if (this->min_gate_distance_number_ != nullptr)
-  //   this->min_gate_distance_number_->publish_state(static_cast<uint16_t>(this->current_config.min_gate));
+  if (this->resistance_number_ != nullptr)
+     this->resistance_number_->publish_state(static_cast<int>(this->current_config.resistance));
   // if (this->max_gate_distance_number_ != nullptr)
   //   this->max_gate_distance_number_->publish_state(static_cast<uint16_t>(this->current_config.max_gate));
   // if (this->gate_move_sensitivity_factor_number_ != nullptr)
@@ -1313,7 +1308,8 @@ void WWRESIComponent::init_config_numbers() {
 //---------------------------------------------------------------------------
 void WWRESIComponent::refresh_config_numbers() {
   this->timeout_number_->publish_state(this->new_config.timeout);
-  // this->min_gate_distance_number_->publish_state(this->new_config.min_gate);
+  this->resistance_number_->publish_state(this->new_config.resistance);
+
   // this->max_gate_distance_number_->publish_state(this->new_config.max_gate);
 }
 
