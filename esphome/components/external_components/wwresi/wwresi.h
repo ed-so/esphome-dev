@@ -53,7 +53,6 @@ static const uint8_t WW_MR01_TOTAL_GATES = 16;
 static const uint16_t FACTORY_TIMEOUT = 120;
 static const int FACTORY_RESISTANCE = -1;
 
-
 static const int CALIBRATE_VERSION_MIN = 154;
 
 static const int S_UART = 0;
@@ -63,6 +62,22 @@ static const int S_CAN = 2;
 // int fdUdp;
 // int fdError;
 // int fdIn;
+
+enum {
+  RESI_RELAYS_N = 3,
+  RESI_R_MAX = 266665,
+  RESI_DECADE_SINGLE_RESISTOR = 200000,
+  RESI_DECADE_MULT_FACT = 10000,
+  RESI_R_MAX_M = 2666665,
+  RESI_DECADE_SINGLE_RESISTOR_M = 2000000,
+  RESI_DECADE_MULT_FACT_M = 100000,
+  RESI_RELAYS_BITS = 20,
+};
+
+enum e_MODE { REMOTE = 0, LOCAL = 1 };
+
+
+
 
 class WWRESIListener {
  public:
@@ -77,8 +92,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   WWRESIComponent();
   ~WWRESIComponent();
 
-  int debug = 1; //1;
-
+  int debug = 1;  // 1;
 
   // Component methods
   /** Where the component's initialization should happen.
@@ -113,35 +127,34 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   //   void set_gate_select_number(number::Number *number) { this->gate_select_number_ = number; };
   void set_resistance_number(number::Number *number) { this->resistance_number_ = number; };
 
+  // void set_max_distance_number(number::Number *number) { this->max_distance_number_ = number; };
+  // void set_gate_move_sensitivity_factor_number(number::Number *number) {
+  //   this->gate_move_sensitivity_factor_number_ = number;
+  // };
+  // void set_gate_still_sensitivity_factor_number(number::Number *number) {
+  //   this->gate_still_sensitivity_factor_number_ = number;
+  // };
+  // void set_gate_still_threshold_numbers(int gate, number::Number *n) {
+  //   this->gate_still_threshold_numbers_[gate] = n;
+  //   };
+  //    void set_gate_move_threshold_numbers(int gate, number::Number *n) {
+  // this->gate_move_threshold_numbers_[gate] = n;
+  // };
+  // bool is_gate_select() {
+  //    return gate_select_number_ != nullptr;
+  // };
+  // uint8_t get_gate_select_value() { return static_cast<uint8_t>(this->gate_select_number_->state); };
 
-    // void set_max_distance_number(number::Number *number) { this->max_distance_number_ = number; };
-    // void set_gate_move_sensitivity_factor_number(number::Number *number) {
-    //   this->gate_move_sensitivity_factor_number_ = number;
-    // };
-    // void set_gate_still_sensitivity_factor_number(number::Number *number) {
-    //   this->gate_still_sensitivity_factor_number_ = number;
-    // };
-    // void set_gate_still_threshold_numbers(int gate, number::Number *n) { 
-    //   this->gate_still_threshold_numbers_[gate] = n; 
-    //   };
-    //    void set_gate_move_threshold_numbers(int gate, number::Number *n) {
-    // this->gate_move_threshold_numbers_[gate] = n; 
-    // }; 
-    // bool is_gate_select() {
-    //    return gate_select_number_ != nullptr;
-    // }; 
-    // uint8_t get_gate_select_value() { return static_cast<uint8_t>(this->gate_select_number_->state); }; 
+  int get_resistance_value() { return resistance_number_->state; };
 
-    int  get_resistance_value() { return resistance_number_->state; }; 
-
-    // float get_max_distance_value() { return  max_distance_number_->state; }; 
-    // void publish_gate_move_threshold(uint8_t gate) {
-    //   // With gate_select we only use 1 number pointer, thus we hard code [0]
-    //   this->gate_move_threshold_numbers_[0]->publish_state(this->new_config.move_thresh[gate]);
-    // };
-    // void publish_gate_still_threshold(uint8_t gate) {
-    //   this->gate_still_threshold_numbers_[0]->publish_state(this->new_config.still_thresh[gate]);
-    // };
+  // float get_max_distance_value() { return  max_distance_number_->state; };
+  // void publish_gate_move_threshold(uint8_t gate) {
+  //   // With gate_select we only use 1 number pointer, thus we hard code [0]
+  //   this->gate_move_threshold_numbers_[0]->publish_state(this->new_config.move_thresh[gate]);
+  // };
+  // void publish_gate_still_threshold(uint8_t gate) {
+  //   this->gate_still_threshold_numbers_[0]->publish_state(this->new_config.still_thresh[gate]);
+  // };
 
   void init_config_numbers();
   void refresh_config_numbers();
@@ -166,8 +179,9 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   //  };
 
   struct RegConfigT {
+    int channel{0};
     int resistance{0};
-    uint16_t max_gate{0};
+    // uint16_t max_gate{0};
     uint16_t timeout{0};
     //   uint32_t move_thresh[WW_MR01_TOTAL_GATES];
     //   uint32_t still_thresh[WW_MR01_TOTAL_GATES];
@@ -208,7 +222,6 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   //   select::Select *operating_selector_{nullptr};
   // #endif
 
-
 #ifdef USE_BUTTON
   button::Button *apply_config_button_{nullptr};
   button::Button *revert_config_button_{nullptr};
@@ -222,6 +235,8 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   //   uint8_t set_config_mode(bool enable);
   //   void set_system_mode(uint16_t mode);
   void wwresi_restart();
+
+  void set_resistance_value();
 
 
  protected:
@@ -248,20 +263,11 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   //   uint16_t get_distance_() { return this->distance_; };
   //   void set_distance_(uint16_t distance) { this->distance_ = distance; };
   void get_cmd_new();
-  void get_read_DIN();
   bool get_cmd_active_() { return this->cmd_active_; };
   void set_cmd_active_(bool active) { this->cmd_active_ = active; };
   //   void handle_simple_mode_(const uint8_t *inbuf, int len);
   //   void handle_energy_mode_(uint8_t *buffer, int len);
   //   void handle_ack_data_(uint8_t *buffer, int len);
-  void readline_(int rx_data, uint8_t *buffer, int len);
-
-  void addCommandToStream_(int streamNr, uint8_t *buffer, int len);
-  void handle_string_command_(std::string str);
-
-  int handleCommand(int streamNr, class Linebuffer *stream, string &line);
-
-  void writeToAll(const string &str, Linebuffer::flags dest);
 
   //   void set_calibration_(bool state) { this->calibration_ = state; };
   //   bool get_calibration_() { return this->calibration_; };
@@ -291,6 +297,26 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   std::vector<WWRESIListener *> listeners_{};
 
   t_Linebuffer_List streams;
+
+  void get_read_DIN();
+  void readline_(int rx_data, uint8_t *buffer, int len);
+
+  void addCommandToStream_(int streamNr, uint8_t *buffer, int len);
+  void handle_string_command_(std::string str);
+
+  int handleCommand(int streamNr, class Linebuffer *stream, string &line);
+
+  void writeToAll(const string &str, Linebuffer::flags dest);
+
+  void stateMachine_DIN(void);
+  void transition_DIN(int chan, int transition);
+
+  void transition_mode(int chan, e_MODE mode);
+  int calculate_relays(int value, unsigned char relays[RESI_RELAYS_N]);
+  void set_r_channel(int chan, double r);
+  void set_r_channel_number(int chan, double r);
+  void set_r_channel_load(int chan, double r);
+
 };
 
 }  // namespace wwresi

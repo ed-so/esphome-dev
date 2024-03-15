@@ -1,3 +1,4 @@
+
 #include "config_number.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
@@ -13,11 +14,10 @@ void WWRESITimeoutNumber::control(float timeout) {
 }
 
 void WWRESIResistanceNumber::control(float value) {
-  if ((int) value > this->parent_->new_config.resistance) {
-    value = this->parent_->get_resistance_value();
-  } else {
+  if ((int) value != this->parent_->new_config.resistance) {
     this->parent_->new_config.resistance = (int) value;
-  }
+    this->parent_->set_resistance_value();
+  } 
   this->publish_state(value);
 }
 

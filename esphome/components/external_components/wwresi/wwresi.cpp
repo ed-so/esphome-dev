@@ -64,17 +64,6 @@ int ResiType = RESI_T_KM;
 
 enum { RESI_DOUT_MAX = 15 };
 
-enum {
-  RESI_RELAYS_N = 3,
-  RESI_R_MAX = 266665,
-  RESI_DECADE_SINGLE_RESISTOR = 200000,
-  RESI_DECADE_MULT_FACT = 10000,
-  RESI_R_MAX_M = 2666665,
-  RESI_DECADE_SINGLE_RESISTOR_M = 2000000,
-  RESI_DECADE_MULT_FACT_M = 100000,
-  RESI_RELAYS_BITS = 20,
-};
-
 enum e_CHANNELS {
   CH_R0 = 0,
   CH_R1 = 1,
@@ -88,9 +77,13 @@ enum e_CHANNELS {
   CH_INVALID = 0x80000000
 };
 
-enum e_MODE { REMOTE = 0, LOCAL = 1 };
 
 enum e_CONSTANTS { INDEX_MAX = 256, DEBOUNCE_DIN = 20000 };
+
+double ValCurrent[CH_N];
+double ValSet[CH_R_N];
+double ValLoad[CH_N];
+double ValVirtual[CH_R_N][INDEX_MAX];
 
 e_MODE Mode[CH_R_N];
 
@@ -98,10 +91,6 @@ int LastDIN[CH_R_N];
 int ConfirmedDIN[CH_R_N];
 t_TIME tLastDINChanged[CH_R_N];
 
-double ValCurrent[CH_N];
-double ValSet[CH_R_N];
-double ValLoad[CH_N];
-double ValVirtual[CH_R_N][INDEX_MAX];
 int Index[CH_R_N];
 
 string ValIpAddr = "";
@@ -235,111 +224,6 @@ t_CHANNELS ParseChannel(string &chan) {
   return channels;
 }
 
-/** function based on PwdOutValue from Pwd-Treiber.txt (Pascal).
-  @param[in] value resistance in Ohm, negative means open, maximum ::RESI_R_MAX
-  @param[out] relays 3 bytes containing relay settings to get value Ohm
-  @return 0 on success, -1 on error
-*/
-int CalculateRelays(int value, unsigned char relays[RESI_RELAYS_N]) {
-  int i;
-  int DecadeSingleResistor;
-  int DecadeMultFact;
-  int BytePos;
-  int BitPos;
-
-  if (value < 0) {
-    // open
-    for (i = 0; i < RESI_RELAYS_N; i++) {
-      relays[i] = 0;
-    }
-    relays[2] = 0x80;
-  } else {
-    for (i = 0; i < RESI_RELAYS_N; i++) {
-      relays[i] = 0;
-    }
-    if (ResiType & RESI_T_M) {
-      // 2.666... MOhm version
-      DecadeSingleResistor = RESI_DECADE_SINGLE_RESISTOR_M;
-      DecadeMultFact = RESI_DECADE_MULT_FACT_M;
-    } else {
-      DecadeSingleResistor = RESI_DECADE_SINGLE_RESISTOR;
-      DecadeMultFact = RESI_DECADE_MULT_FACT;
-    }
-
-    for (i = RESI_RELAYS_BITS; i >= 0; i--) {
-      BytePos = i / 8;
-      BitPos = i % 8;
-      if (i % 4 == 3) {
-        DecadeSingleResistor = 8 * DecadeMultFact;
-        DecadeMultFact /= 10;
-      } else {
-        DecadeSingleResistor /= 2;
-      }
-
-      if (value >= DecadeSingleResistor) {
-        value -= DecadeSingleResistor;
-        // each BytePos,BitPos pair occurs only once so XOR works OK
-        // original code had OR here
-        // but XOR will also work when starting from 0xff
-        relays[BytePos] ^= (1 << BitPos);
-      }
-    }
-    if (ResiType & RESI_T_M) {
-      unsigned tmp;
-      // we have to shift right 4 bits
-      tmp = relays[2];
-      relays[2] = (relays[1] >> 4) | (relays[2] & 0x10);
-      relays[1] = (relays[1] << 4) | (relays[0] >> 4);
-      relays[0] = (relays[0] << 4) | (tmp & 0xf);
-    }
-    // check whether bypass is possible, also for 2.6M
-    if (relays[2] == 0 && relays[1] == 0) {
-      relays[2] ^= 0x40;
-      if ((relays[0] & 0xf0) == 0) {
-        relays[2] ^= 0x20;
-      }
-    }
-    // invertion needed for 21 bits
-    for (i = 0; i < 2; i++) {
-      relays[i] ^= 0xff;
-    }
-    relays[2] ^= 0x1f;
-  }
-  return 0;
-}
-
-void SetRChannel(int chan, double r) {
-  unsigned char relays[RESI_RELAYS_N];
-  char val_str[30];
-  int ri = (int) round(r);
-  CalculateRelays(ri, relays);
-  relays[2] ^= 0x80;  // invert bit X24 here instead in FPGA RESI20
-
-  // if(debug>1) {
-  // 	cerr << "SetRChannel("<<chan<<","<<ri<<") = " <<hex<< (int)relays[0] <<" "<< (int)relays[1] <<" "<<
-  // (int)relays[2]<<"\n";
-  // }
-
-  // todo eso
-  //  PortWrite(chan?SFMB_15_0_A:SFMA_15_0_A , relays[0] | (relays[1]<<8));
-  //  PortWrite(chan?SFMB_23_16_A:SFMA_23_16_A , relays[2]);
-
-  if (ri < 0) {
-    // todo eso
-    //  Display57C(chan, 5*6, "OPEN        ");
-    return;
-  }
-  if (ri / 1000000) {
-    sprintf(val_str, "%1d %03d %03d <", ri / 1000000, (ri / 1000) % 1000, ri % 1000);
-  } else if (ri / 1000) {
-    sprintf(val_str, "  %3d %03d <", ri / 1000, ri % 1000);
-  } else {
-    sprintf(val_str, "      %3d <", ri);
-  }
-  // todo eso
-  //  Display57C(chan, 5*6, val_str);
-}
-
 void RefreshIndex(void) {
   char buf[20];
   int chan;
@@ -359,72 +243,6 @@ void SetDOUT(unsigned long val) {
   // PortWrite(RESIC_DOUT, val);
   // RecentDOUT = val;
   // RefreshLcdDOUT();
-}
-
-void TransitionDIN(int chan, int transition) {
-  if (Mode[chan] != LOCAL) {
-    return;
-  }
-  // specification rev 0.6 Table 6
-  switch (transition) {
-    case 0x1:  // increment
-      Index[chan] = (Index[chan] + 1) % INDEX_MAX;
-      break;
-    case 0x2:  // decrement
-      Index[chan] = (Index[chan] + INDEX_MAX - 1) % INDEX_MAX;
-      break;
-    case 0x3:  // reset 00 -> 11
-    case 0x7:  // 01 -> 11 (robustness)
-    case 0xB:  // 10 -> 11 (robustness)
-      Index[chan] = 0;
-      break;
-    default:
-      return;  // no further action
-  }
-
-  // we are in LOCAL mode and Index has changed, time to change R as well
-  ValCurrent[chan] = ValVirtual[chan][Index[chan]];
-  SetRChannel(chan, ValCurrent[chan]);
-  RefreshIndex();
-
-  // send ACK message
-  std::ostringstream ack;
-  ack << "OK\nINDX " << chan << " " << Index[chan] << "\nSET " << chan << " " << ValCurrent[chan] << "\n\r\n";
-  // todo eso  writeToAll(ack.str(), Linebuffer::F_ECHO_INDX);
-}
-
-void TransitionMODE(int chan, enum e_MODE mode) {
-  Index[chan] = 0;
-  Mode[chan] = mode;
-  if (mode == LOCAL) {
-    ValCurrent[chan] = ValVirtual[chan][Index[chan]];
-  } else {
-    ValCurrent[chan] = ValSet[chan];
-  }
-  SetRChannel(chan, ValCurrent[chan]);
-  RefreshIndex();
-}
-
-void StateMachineDIN(void) {
-  int i;
-  for (i = 0; i < CH_R_N; i++) {
-    int din = (RecentDIN >> (2 * i)) & 3;
-    if (din != ConfirmedDIN[i]) {
-      if (din == LastDIN[i]) {
-        if ((tnow - tLastDINChanged[i]) > DEBOUNCE_DIN) {
-          // 2 bits FROM + 2 bits TO
-          // FROM may be also -1 during program initialization
-          TransitionDIN(i, (ConfirmedDIN[i] << 2) | din);
-          ConfirmedDIN[i] = din;
-        } else {
-          // just wait longer
-        }
-      } else {
-        LastDIN[i] = din;
-        tLastDINChanged[i] = tnow;
-      }
-    }
-  }
 }
 
 void Changed(bool chd) {
@@ -559,12 +377,12 @@ void WWRESIComponent::setup() {
     listener->on_fw_version(fw_str);
   }
 
-//   for (uint8_t gate = 0; gate < LD2420_TOTAL_GATES; gate++) {
-//     delay_microseconds_safe(125);
-//     this->get_gate_threshold_(gate);
-//   }
+  //   for (uint8_t gate = 0; gate < LD2420_TOTAL_GATES; gate++) {
+  //     delay_microseconds_safe(125);
+  //     this->get_gate_threshold_(gate);
+  //   }
 
-//   memcpy(&this->new_config, &this->current_config, sizeof(this->current_config));
+  memcpy(&this->new_config, &this->current_config, sizeof(this->current_config));
 //   if (get_firmware_int_(ld2420_firmware_ver_) < CALIBRATE_VERSION_MIN) {
 //     this->set_operating_mode(OP_SIMPLE_MODE_STRING);
 //     this->operating_selector_->publish_state(OP_SIMPLE_MODE_STRING);
@@ -716,6 +534,215 @@ void WWRESIComponent::get_read_DIN() {
 }
 
 //---------------------------------------------------------------------------
+/// @brief
+/// @param chan
+/// @param
+void WWRESIComponent::transition_mode(int chan, enum e_MODE mode) {
+  Index[chan] = 0;
+  Mode[chan] = mode;
+  if (mode == LOCAL) {
+    ValCurrent[chan] = ValVirtual[chan][Index[chan]];
+  } else {
+    ValCurrent[chan] = ValSet[chan];
+  }
+  set_r_channel(chan, ValCurrent[chan]);
+  RefreshIndex();
+}
+
+//---------------------------------------------------------------------------
+/// @brief
+/// @param
+void WWRESIComponent::stateMachine_DIN(void) {
+  int i;
+  for (i = 0; i < CH_R_N; i++) {
+    int din = (RecentDIN >> (2 * i)) & 3;
+    if (din != ConfirmedDIN[i]) {
+      if (din == LastDIN[i]) {
+        if ((tnow - tLastDINChanged[i]) > DEBOUNCE_DIN) {
+          // 2 bits FROM + 2 bits TO
+          // FROM may be also -1 during program initialization
+          transition_DIN(i, (ConfirmedDIN[i] << 2) | din);
+          ConfirmedDIN[i] = din;
+        } else {
+          // just wait longer
+        }
+      } else {
+        LastDIN[i] = din;
+        tLastDINChanged[i] = tnow;
+      }
+    }
+  }
+}
+
+//---------------------------------------------------------------------------
+/// @brief
+/// @param chan
+/// @param transition
+void WWRESIComponent::transition_DIN(int chan, int transition) {
+  if (Mode[chan] != LOCAL) {
+    return;
+  }
+  // specification rev 0.6 Table 6
+  switch (transition) {
+    case 0x1:  // increment
+      Index[chan] = (Index[chan] + 1) % INDEX_MAX;
+      break;
+    case 0x2:  // decrement
+      Index[chan] = (Index[chan] + INDEX_MAX - 1) % INDEX_MAX;
+      break;
+    case 0x3:  // reset 00 -> 11
+    case 0x7:  // 01 -> 11 (robustness)
+    case 0xB:  // 10 -> 11 (robustness)
+      Index[chan] = 0;
+      break;
+    default:
+      return;  // no further action
+  }
+
+  // we are in LOCAL mode and Index has changed, time to change R as well
+  ValCurrent[chan] = ValVirtual[chan][Index[chan]];
+  set_r_channel(chan, ValCurrent[chan]);
+  RefreshIndex();
+
+  // send ACK message
+  std::ostringstream ack;
+  ack << "OK\nINDX " << chan << " " << Index[chan] << "\nSET " << chan << " " << ValCurrent[chan] << "\n\r\n";
+  // todo eso  writeToAll(ack.str(), Linebuffer::F_ECHO_INDX);
+}
+
+//---------------------------------------------------------------------------
+/// @brief function based on PwdOutValue from Pwd-Treiber.txt (Pascal).
+/// @param value value resistance in Ohm, negative means open, maximum ::RESI_R_MAX
+/// @param relays relays 3 bytes containing relay settings to get value Ohm
+/// @return 0 on success, -1 on error
+int WWRESIComponent::calculate_relays(int value, unsigned char relays[RESI_RELAYS_N]) {
+  int i;
+  int DecadeSingleResistor;
+  int DecadeMultFact;
+  int BytePos;
+  int BitPos;
+
+  if (value < 0) {
+    // open
+    for (i = 0; i < RESI_RELAYS_N; i++) {
+      relays[i] = 0;
+    }
+    relays[2] = 0x80;
+  } else {
+    for (i = 0; i < RESI_RELAYS_N; i++) {
+      relays[i] = 0;
+    }
+    if (ResiType & RESI_T_M) {
+      // 2.666... MOhm version
+      DecadeSingleResistor = RESI_DECADE_SINGLE_RESISTOR_M;
+      DecadeMultFact = RESI_DECADE_MULT_FACT_M;
+    } else {
+      DecadeSingleResistor = RESI_DECADE_SINGLE_RESISTOR;
+      DecadeMultFact = RESI_DECADE_MULT_FACT;
+    }
+
+    for (i = RESI_RELAYS_BITS; i >= 0; i--) {
+      BytePos = i / 8;
+      BitPos = i % 8;
+      if (i % 4 == 3) {
+        DecadeSingleResistor = 8 * DecadeMultFact;
+        DecadeMultFact /= 10;
+      } else {
+        DecadeSingleResistor /= 2;
+      }
+
+      if (value >= DecadeSingleResistor) {
+        value -= DecadeSingleResistor;
+        // each BytePos,BitPos pair occurs only once so XOR works OK
+        // original code had OR here
+        // but XOR will also work when starting from 0xff
+        relays[BytePos] ^= (1 << BitPos);
+      }
+    }
+    if (ResiType & RESI_T_M) {
+      unsigned tmp;
+      // we have to shift right 4 bits
+      tmp = relays[2];
+      relays[2] = (relays[1] >> 4) | (relays[2] & 0x10);
+      relays[1] = (relays[1] << 4) | (relays[0] >> 4);
+      relays[0] = (relays[0] << 4) | (tmp & 0xf);
+    }
+    // check whether bypass is possible, also for 2.6M
+    if (relays[2] == 0 && relays[1] == 0) {
+      relays[2] ^= 0x40;
+      if ((relays[0] & 0xf0) == 0) {
+        relays[2] ^= 0x20;
+      }
+    }
+    // invertion needed for 21 bits
+    for (i = 0; i < 2; i++) {
+      relays[i] ^= 0xff;
+    }
+    relays[2] ^= 0x1f;
+  }
+  return 0;
+}
+
+//---------------------------------------------------------------------------
+/// @brief
+/// @param chan
+/// @param r
+void WWRESIComponent::set_r_channel_number(int chan, double r) {
+  set_r_channel(chan, r);
+  if (this->resistance_number_ != nullptr)
+    this->resistance_number_->publish_state(static_cast<int>(round(r)));
+}
+
+void WWRESIComponent::set_r_channel_load(int chan, double r) {
+  ValLoad[chan] = r;
+  ValSet[chan] = ValLoad[chan];
+  ValCurrent[chan] = ValSet[chan];
+  set_r_channel(chan, r);
+}
+
+void WWRESIComponent::set_resistance_value() { set_r_channel_load(new_config.channel, new_config.resistance); }
+
+//---------------------------------------------------------------------------
+/// @brief
+/// @param chan
+/// @param r
+void WWRESIComponent::set_r_channel(int chan, double r) {
+  unsigned char relays[RESI_RELAYS_N];
+  char val_str[30];
+
+  int ri = (int) round(r);
+  calculate_relays(ri, relays);
+
+  // relays[2] ^= 0x80;  // invert bit X24 here instead in FPGA RESI20
+
+  if (debug) {
+    std::ostringstream dbgstr;
+    dbgstr << "set_r_channel(" << chan << "," << ri << ") = " << std::hex << (int) relays[0] << " " << (int) relays[1]
+           << " " << (int) relays[2];
+    ESP_LOGD(TAG, "%s", dbgstr.str().c_str());
+  }
+
+  // todo eso
+  //  PortWrite(chan?SFMB_15_0_A:SFMA_15_0_A , relays[0] | (relays[1]<<8));
+  //  PortWrite(chan?SFMB_23_16_A:SFMA_23_16_A , relays[2]);
+
+  if (ri < 0) {
+    // todo eso
+    //  Display57C(chan, 5*6, "OPEN        ");
+    return;
+  }
+  if (ri / 1000000) {
+    sprintf(val_str, "%1d %03d %03d <", ri / 1000000, (ri / 1000) % 1000, ri % 1000);
+  } else if (ri / 1000) {
+    sprintf(val_str, "  %3d %03d <", ri / 1000, ri % 1000);
+  } else {
+    sprintf(val_str, "      %3d <", ri);
+  }
+  // todo eso
+  //  Display57C(chan, 5*6, val_str);
+}
+
+//---------------------------------------------------------------------------
 /// @brief put uart char to buffer until CR 0x0a
 /// @param rx_data
 /// @param buffer
@@ -764,7 +791,7 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
     ESP_LOGD("wwresi", "new cmd  %s from %d", str.c_str(), streamNr);
   }
 
-  if (str.length() == 0){    
+  if (str.length() == 0) {
     return;
   }
 
@@ -939,10 +966,10 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
               if (Mode[i] != LOCAL) {
                 ValSet[i] = ValLoad[i];
                 ValCurrent[i] = ValSet[i];
-                SetRChannel(i, ValCurrent[i]);
-                ack << "SET " << i << " " << ValCurrent[i] << "\n";
+                set_r_channel_number(i, ValCurrent[i]);
+                ack << "SET " << i << " " << (int) ValCurrent[i] << "\n";
               } else {
-                ack << "SET " << i << " " << ValCurrent[i] << "\n";  // CHECKME return ValSet ?
+                ack << "SET " << i << " " << (int) ValCurrent[i] << "\n";
               }
               break;
             case CH_R0V:
@@ -1034,12 +1061,12 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
   } else if (cmd == "MODE") {
     if (chan == "LOCAL") {
       Mode[CH_R0] = Mode[CH_R1] = LOCAL;
-      TransitionMODE(CH_R0, Mode[CH_R0]);
-      TransitionMODE(CH_R1, Mode[CH_R1]);
+      transition_mode(CH_R0, Mode[CH_R0]);
+      transition_mode(CH_R1, Mode[CH_R1]);
     } else if (chan == "REMOTE") {
       Mode[CH_R0] = Mode[CH_R1] = REMOTE;
-      TransitionMODE(CH_R0, Mode[CH_R0]);
-      TransitionMODE(CH_R1, Mode[CH_R1]);
+      transition_mode(CH_R0, Mode[CH_R0]);
+      transition_mode(CH_R1, Mode[CH_R1]);
     } else if (chan == "") {
     } else {
       ack << "ERR " << stream->m_fd << " invalid MODE :" << chan << ":\n";
@@ -1197,7 +1224,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
 
 error_jump:
   ack << "\r\n";
-  //	cerr << ack.str();
+
   if (debug) {
     ESP_LOGD(TAG, "ack: %s", ack.str().c_str());
   }
@@ -1286,7 +1313,7 @@ void WWRESIComponent::init_config_numbers() {
   // if (this->gate_select_number_ != nullptr)
   //   this->gate_select_number_->publish_state(0);
   if (this->resistance_number_ != nullptr)
-     this->resistance_number_->publish_state(static_cast<int>(this->current_config.resistance));
+    this->resistance_number_->publish_state(static_cast<int>(this->current_config.resistance));
   // if (this->max_gate_distance_number_ != nullptr)
   //   this->max_gate_distance_number_->publish_state(static_cast<uint16_t>(this->current_config.max_gate));
   // if (this->gate_move_sensitivity_factor_number_ != nullptr)
