@@ -64,19 +64,41 @@ static const int S_CAN = 2;
 // int fdIn;
 
 enum {
-  RESI_RELAYS_N = 3,
-  RESI_R_MAX = 266665,
-  RESI_DECADE_SINGLE_RESISTOR = 200000,
-  RESI_DECADE_MULT_FACT = 10000,
+  RESI_RELAYS_N = 4,
+
+  // RESI_R_MAX = 266665,
+  // RESI_DECADE_SINGLE_RESISTOR = 200000,
+  // RESI_DECADE_MULT_FACT = 10000,
+  
   RESI_R_MAX_M = 2666665,
   RESI_DECADE_SINGLE_RESISTOR_M = 2000000,
   RESI_DECADE_MULT_FACT_M = 100000,
-  RESI_RELAYS_BITS = 20,
+
+  RESI_RELAYS_BITS = 24,
 };
 
 enum e_MODE { REMOTE = 0, LOCAL = 1 };
 
+enum e_CHANNELS {
+  CH_R0 = 0,
+  CH_R1 = 1,
+  CH_R_N = 2,
+  CH_DOUT = 2,
+  CH_DIN = 3,
+  CH_R0V = 4,
+  CH_R1V = 5,
 
+  CH_N,
+  CH_INVALID = 0x80000000
+};
+
+
+struct WWRESIFlashData {
+  char serial_number[8];
+  uint8_t eth_ip_address[4];
+  uint8_t eth_ip_mask[4];
+  uint8_t eth_ip_gateway[4];
+} PACKED;
 
 
 class WWRESIListener {
@@ -87,6 +109,48 @@ class WWRESIListener {
   virtual void on_fw_version(std::string &fw){};
 };
 
+class t_CHANNELS;
+
+
+//--------------------------------------------------------------------------------------------------------------
+/// @brief class storing bitmask of active channels (up to 15 bits) in bits 16..30 of 32 bit uint and "virtual channel"
+/// SZ value in lower 16 bits
+class t_CHANNELS {
+ protected:
+  unsigned int chn;  /// bits 0..15SZ, bits 16..30 selected channel, bit 31 = INVALID channel
+ public:
+  t_CHANNELS() : chn(0){};
+  t_CHANNELS(unsigned int x) : chn(x){};
+  bool operator&(enum e_CHANNELS ch) {
+    // cout<<"operator& (enum e_CHANNELS ch),  ch : "<<ch<<"  m_chn : "<<chn<<"\n";
+    // cout<<"operator&(enum e_CHANNELS ch) ,  ((0x10000<<ch) & chn) != 0 :  "<<(((0x10000<<ch) & (int)chn) != 0)<<"\n";
+    // return ((0x10000<<(int)ch) & chn) != 0;
+    return (*this) & (int) ch;
+  }
+  bool operator&(int ch) {
+    // cout<<"operator& (int ch),  ch : "<<ch<<"  m_chn : "<<chn<<"\n";
+    // cout<<"operator&(int ch) ,  ((0x10000<<ch) & chn) != 0 :  "<<(((0x10000<<ch) & (int)chn) != 0)<<"\n";
+    return ((0x10000 << ch) & chn) != 0;
+  }
+  int getv() { return chn & 0xffff; }
+  t_CHANNELS &operator|(enum e_CHANNELS ch) { return *this | (int) ch; }
+  t_CHANNELS &operator|(int ch) {
+    chn |= (0x10000 << ch);
+    return *this;
+  }
+  /** set SZ value (16 bit)
+  @param v SZ value to be stored in this class
+  @return class reference
+  */
+  t_CHANNELS &setv(int v) {
+    chn &= ~0xffff;
+    chn |= v & 0xffff;
+    return *this;
+  }
+  operator int() { return chn; }
+};
+
+
 class WWRESIComponent : public Component, public uart::UARTDevice {
  public:
   WWRESIComponent();
@@ -94,7 +158,6 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 
   int debug = 1;  // 1;
 
-  // Component methods
   /** Where the component's initialization should happen.
    *
    * Analogous to Arduino's setup(). This method is guaranteed to only be called once.
@@ -103,7 +166,6 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   void setup() override;
 
   /** prints the user configuration.
-   *
    *
    *
    */
@@ -304,6 +366,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   void addCommandToStream_(int streamNr, uint8_t *buffer, int len);
   void handle_string_command_(std::string str);
 
+  t_CHANNELS parse_channel(string &chan) ;
   int handleCommand(int streamNr, class Linebuffer *stream, string &line);
 
   void writeToAll(const string &str, Linebuffer::flags dest);

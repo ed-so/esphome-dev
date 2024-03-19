@@ -4,6 +4,9 @@
 #include <algorithm>
 #include "esphome/core/application.h"
 
+// #include <preferences.h>
+#include "esphome.h"
+
 #include "linebuffer.h"
 #include "wwresi.h"
 
@@ -63,20 +66,6 @@ enum e_resi_type { RESI_T_K = 0, RESI_T_M = 1, RESI_T_KM = 2 };
 int ResiType = RESI_T_KM;
 
 enum { RESI_DOUT_MAX = 15 };
-
-enum e_CHANNELS {
-  CH_R0 = 0,
-  CH_R1 = 1,
-  CH_R_N = 2,
-  CH_DOUT = 2,
-  CH_DIN = 3,
-  CH_R0V = 4,
-  CH_R1V = 5,
-
-  CH_N,
-  CH_INVALID = 0x80000000
-};
-
 
 enum e_CONSTANTS { INDEX_MAX = 256, DEBOUNCE_DIN = 20000 };
 
@@ -140,89 +129,7 @@ void die(char *str) {
   exit(10);
 }
 
-class t_CHANNELS;
-
-//--------------------------------------------------------------------------------------------------------------
-/// @brief class storing bitmask of active channels (up to 15 bits) in bits 16..30 of 32 bit uint and "virtual channel"
-/// SZ value in lower 16 bits
-class t_CHANNELS {
- protected:
-  unsigned int chn;  /// bits 0..15SZ, bits 16..30 selected channel, bit 31 = INVALID channel
- public:
-  t_CHANNELS() : chn(0){};
-  t_CHANNELS(unsigned int x) : chn(x){};
-  bool operator&(enum e_CHANNELS ch) {
-    // cout<<"operator& (enum e_CHANNELS ch),  ch : "<<ch<<"  m_chn : "<<chn<<"\n";
-    // cout<<"operator&(enum e_CHANNELS ch) ,  ((0x10000<<ch) & chn) != 0 :  "<<(((0x10000<<ch) & (int)chn) != 0)<<"\n";
-    // return ((0x10000<<(int)ch) & chn) != 0;
-    return (*this) & (int) ch;
-  }
-  bool operator&(int ch) {
-    // cout<<"operator& (int ch),  ch : "<<ch<<"  m_chn : "<<chn<<"\n";
-    // cout<<"operator&(int ch) ,  ((0x10000<<ch) & chn) != 0 :  "<<(((0x10000<<ch) & (int)chn) != 0)<<"\n";
-    return ((0x10000 << ch) & chn) != 0;
-  }
-  int getv() { return chn & 0xffff; }
-  t_CHANNELS &operator|(enum e_CHANNELS ch) { return *this | (int) ch; }
-  t_CHANNELS &operator|(int ch) {
-    chn |= (0x10000 << ch);
-    return *this;
-  }
-  /** set SZ value (16 bit)
-  @param v SZ value to be stored in this class
-  @return class reference
-  */
-  t_CHANNELS &setv(int v) {
-    chn &= ~0xffff;
-    chn |= v & 0xffff;
-    return *this;
-  }
-  operator int() { return chn; }
-};
-
 int CH(int ch) { return 0x10000 << ch; }
-
-t_CHANNELS ParseChannel(string &chan) {
-  t_CHANNELS channels = 0;
-  const char *str = chan.data();
-  if (chan.length() == 0) {
-    channels | CH_R0 | CH_R1 | CH_DOUT;
-  } else if (chan.length() == 1) {
-    if (chan[0] == '0') {
-      channels | CH_R0;
-    } else if (chan == "1") {
-      channels | CH_R1;
-    } else {
-      return CH_INVALID;
-    }
-  } else if (chan.length() == 2) {
-    return CH_INVALID;
-  } else {  // min 3 characters
-    if (str[1] == 'V') {
-      int tmp = atoi(str + 2);
-      if (tmp < 0 || tmp >= INDEX_MAX) {
-        return CH_INVALID;
-      }
-      channels.setv(tmp);
-      if (str[0] == '0') {
-        channels | CH_R0V;
-      } else if (str[0] == '1') {
-        channels | CH_R1V;
-      } else {
-        return CH_INVALID;
-      }
-    } else if (chan == "ALL") {
-      channels | CH_R0 | CH_R1;
-    } else if (chan == "DOUT") {
-      channels | CH_DOUT;
-    } else if (chan == "DIN") {
-      channels | CH_DIN;
-    } else {
-      return CH_INVALID;
-    }
-  }
-  return channels;
-}
 
 void RefreshIndex(void) {
   char buf[20];
@@ -613,7 +520,7 @@ void WWRESIComponent::transition_DIN(int chan, int transition) {
 //---------------------------------------------------------------------------
 /// @brief function based on PwdOutValue from Pwd-Treiber.txt (Pascal).
 /// @param value value resistance in Ohm, negative means open, maximum ::RESI_R_MAX
-/// @param relays relays 3 bytes containing relay settings to get value Ohm
+/// @param relays relays 4 bytes containing relay settings to get value Ohm
 /// @return 0 on success, -1 on error
 int WWRESIComponent::calculate_relays(int value, unsigned char relays[RESI_RELAYS_N]) {
   int i;
@@ -622,24 +529,14 @@ int WWRESIComponent::calculate_relays(int value, unsigned char relays[RESI_RELAY
   int BytePos;
   int BitPos;
 
-  if (value < 0) {
-    // open
-    for (i = 0; i < RESI_RELAYS_N; i++) {
-      relays[i] = 0;
-    }
-    relays[2] = 0x80;
-  } else {
-    for (i = 0; i < RESI_RELAYS_N; i++) {
-      relays[i] = 0;
-    }
-    if (ResiType & RESI_T_M) {
-      // 2.666... MOhm version
-      DecadeSingleResistor = RESI_DECADE_SINGLE_RESISTOR_M;
-      DecadeMultFact = RESI_DECADE_MULT_FACT_M;
-    } else {
-      DecadeSingleResistor = RESI_DECADE_SINGLE_RESISTOR;
-      DecadeMultFact = RESI_DECADE_MULT_FACT;
-    }
+  // open all
+  for (i = 0; i < RESI_RELAYS_N; i++) {
+    relays[i] = 0;
+  }
+
+  if (value >= 0) {
+    DecadeSingleResistor = RESI_DECADE_SINGLE_RESISTOR_M;
+    DecadeMultFact = RESI_DECADE_MULT_FACT_M;
 
     for (i = RESI_RELAYS_BITS; i >= 0; i--) {
       BytePos = i / 8;
@@ -653,33 +550,28 @@ int WWRESIComponent::calculate_relays(int value, unsigned char relays[RESI_RELAY
 
       if (value >= DecadeSingleResistor) {
         value -= DecadeSingleResistor;
-        // each BytePos,BitPos pair occurs only once so XOR works OK
-        // original code had OR here
-        // but XOR will also work when starting from 0xff
         relays[BytePos] ^= (1 << BitPos);
       }
     }
-    if (ResiType & RESI_T_M) {
-      unsigned tmp;
-      // we have to shift right 4 bits
-      tmp = relays[2];
-      relays[2] = (relays[1] >> 4) | (relays[2] & 0x10);
-      relays[1] = (relays[1] << 4) | (relays[0] >> 4);
-      relays[0] = (relays[0] << 4) | (tmp & 0xf);
-    }
-    // check whether bypass is possible, also for 2.6M
-    if (relays[2] == 0 && relays[1] == 0) {
-      relays[2] ^= 0x40;
+
+    // check whether bypass is possible,
+    if (relays[3] == 0 && relays[2] == 0 && relays[1] == 0) {
+      relays[3] ^= 0x04;  // mr01 K27
       if ((relays[0] & 0xf0) == 0) {
-        relays[2] ^= 0x20;
+        relays[3] ^= 0x02;  // mr01 K26
       }
     }
-    // invertion needed for 21 bits
-    for (i = 0; i < 2; i++) {
-      relays[i] ^= 0xff;
-    }
-    relays[2] ^= 0x1f;
+  } else {
+    relays[3] ^= 0x08;  // mr01 K28
   }
+  
+  if (debug) {
+    std::ostringstream dbgstr;
+    dbgstr << "relays = " << std::hex << (int) relays[3] << " " << (int) relays[2] << " " << (int) relays[1] << " "
+           << (int) relays[0];
+    ESP_LOGD(TAG, "Rel: %02x %02x %02x %02x", relays[3], relays[2], relays[1], relays[0]);
+  }
+
   return 0;
 }
 
@@ -717,8 +609,8 @@ void WWRESIComponent::set_r_channel(int chan, double r) {
 
   if (debug) {
     std::ostringstream dbgstr;
-    dbgstr << "set_r_channel(" << chan << "," << ri << ") = " << std::hex << (int) relays[0] << " " << (int) relays[1]
-           << " " << (int) relays[2];
+    dbgstr << "set_r_channel(" << chan << "," << ri << ") = " << std::hex << (int) relays[3] << " " << (int) relays[2]
+           << " " << (int) relays[1] << " " << (int) relays[0];
     ESP_LOGD(TAG, "%s", dbgstr.str().c_str());
   }
 
@@ -818,6 +710,48 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
 
 //==========================================================================================================
 
+t_CHANNELS WWRESIComponent::parse_channel(string &chan) {
+  t_CHANNELS channels = 0;
+  const char *str = chan.data();
+  if (chan.length() == 0) {
+    channels | CH_R0 | CH_R1 | CH_DOUT;
+  } else if (chan.length() == 1) {
+    if (chan[0] == '0') {
+      channels | CH_R0;
+    } else if (chan == "1") {
+      channels | CH_R1;
+    } else {
+      return CH_INVALID;
+    }
+  } else if (chan.length() == 2) {
+    return CH_INVALID;
+  } else {  // min 3 characters
+    if (str[1] == 'V') {
+      int tmp = atoi(str + 2);
+      if (tmp < 0 || tmp >= INDEX_MAX) {
+        return CH_INVALID;
+      }
+      channels.setv(tmp);
+      if (str[0] == '0') {
+        channels | CH_R0V;
+      } else if (str[0] == '1') {
+        channels | CH_R1V;
+      } else {
+        return CH_INVALID;
+      }
+    } else if (chan == "ALL") {
+      channels | CH_R0 | CH_R1;
+    } else if (chan == "DOUT") {
+      channels | CH_DOUT;
+    } else if (chan == "DIN") {
+      channels | CH_DIN;
+    } else {
+      return CH_INVALID;
+    }
+  }
+  return channels;
+}
+
 //---------------------------------------------------------------------------
 /// @brief run command called from Linebuffer
 /// @param stream
@@ -853,7 +787,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
   }
   //--- set and load command .........................
   if (cmd == "SET" || cmd == "LOAD") {
-    channels = ParseChannel(chan);
+    channels = parse_channel(chan);
     if (channels == CH_INVALID || (channels & CH(CH_DIN))) {
       ack << "ERR " << stream->m_fd << " invalid channel :" << chan << ": " << channels << "\n";
       ack << line << "\n";
@@ -895,25 +829,26 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
             ack << line << "\n";
             goto error_jump;
           }
-        } else if (ResiType & RESI_T_M) {
-          if (val < 0.0) {
-            if (val < -1.0001 || val > -0.9999) {
-              ack << "ERR " << stream->m_fd << " wrong value\n";
-              ack << line << "\n";
-              goto error_jump;
-            }
-          } else if (val > RESI_R_MAX_M + 0.0001 || fabs(10 * round(val / 10) - val) > 0.0001) {
-            ack << "ERR " << stream->m_fd << " wrong value\n";
-            ack << line << "\n";
-            goto error_jump;
-          }
-        } else {
-          if (val < -1.0001 || val > RESI_R_MAX + 0.0001 || fabs(round(val) - val) > 0.0001) {
-            ack << "ERR " << stream->m_fd << " wrong value\n";
-            ack << line << "\n";
-            goto error_jump;
-          }
         }
+        // else if (ResiType & RESI_T_M) {
+        //   if (val < 0.0) {
+        //     if (val < -1.0001 || val > -0.9999) {
+        //       ack << "ERR " << stream->m_fd << " wrong value\n";
+        //       ack << line << "\n";
+        //       goto error_jump;
+        //     }
+        //   } else if (val > RESI_R_MAX_M + 0.0001 || fabs(10 * round(val / 10) - val) > 0.0001) {
+        //     ack << "ERR " << stream->m_fd << " wrong value\n";
+        //     ack << line << "\n";
+        //     goto error_jump;
+        //   }
+        // } else {
+        //   if (val < -1.0001 || val > RESI_R_MAX + 0.0001 || fabs(round(val) - val) > 0.0001) {
+        //     ack << "ERR " << stream->m_fd << " wrong value\n";
+        //     ack << line << "\n";
+        //     goto error_jump;
+        //   }
+        // }
       } else if (channels & CH(CH_DOUT)) {
         if (unitch == 'H') {
           val = strtol(value.c_str(), &end_ptr, 16);
@@ -1013,7 +948,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
       // printACK(ack.str()); //temp
     }
   } else if (cmd == "CLEAR") {
-    channels = ParseChannel(chan);
+    channels = parse_channel(chan);
     if (channels == CH_INVALID) {
       ack << "ERR " << stream->m_fd << " invalid channel CLEAR\n";
       ack << line << "\n";
@@ -1027,7 +962,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     }
     ack << "OK " << stream->m_fd << "\nCLEAR " << chan << "\n";
   } else if (cmd == "GET") {
-    channels = ParseChannel(chan);
+    channels = parse_channel(chan);
     if (channels == CH_INVALID) {
       ack << "ERR " << stream->m_fd << " invalid channel GET\n";
       ack << line << "\n";
@@ -1113,15 +1048,16 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     ack << stream->m_flags << "\n";
   } else if (cmd == "TYPE") {
     ack << "OK " << stream->m_fd << "\nTYPE ";
-    if (ResiType & RESI_T_M) {
-      ack << "RESI 3 2.6M\n";
+    if (ResiType & RESI_T_KM) {
+      ack << "RESI 4 2.6M\n";
       ack << "RMIN 0\nRMAX " << RESI_R_MAX_M << "\n";
-      ack << "RSTEP 10\nROPEN -1\nINP_N 4\nOUT_N 4\nVIRT_N 256\n";
-    } else {
-      ack << "RESI 2 266K\n";
-      ack << "RMIN 0\nRMAX " << RESI_R_MAX << "\n";
       ack << "RSTEP 1\nROPEN -1\nINP_N 4\nOUT_N 4\nVIRT_N 256\n";
     }
+    //  else {
+    //   ack << "RESI 2 266K\n";
+    //   ack << "RMIN 0\nRMAX " << RESI_R_MAX << "\n";
+    //   ack << "RSTEP 1\nROPEN -1\nINP_N 4\nOUT_N 4\nVIRT_N 256\n";
+    // }
     ack << "SW " << version << "\n";
     ack << "SN " << serialnr << "\n";
   } else if (cmd == "CFRAME") {
