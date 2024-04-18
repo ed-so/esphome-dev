@@ -1,19 +1,23 @@
-
-#include <unistd.h>
-#include <list>
-#include <algorithm>
-#include "esphome/core/application.h"
-
-// #include <preferences.h>
-#include "esphome.h"
-
-#include "linebuffer.h"
 #include "wwresi.h"
+#include <cerrno>
+#include "linebuffer.h"
+#include "esphome/components/network/util.h"
+#include "esphome/core/application.h"
+#include "esphome/core/defines.h"
+#include "esphome/core/hal.h"
+#include "esphome/core/log.h"
+#include "esphome/core/util.h"
+#include "esphome/core/version.h"
+#include "esphome/components/md5/md5.h"
+
+#include <algorithm>
 
 using std::string;
 
 namespace esphome {
 namespace wwresi {
+
+static const char *const TAG = "wwresi";
 
 /** global variables */
 
@@ -48,6 +52,7 @@ unsigned long brid = BROAD_CAN_RID;
 unsigned long rid = 100;
 // var. for TID
 unsigned long tid = 101;
+
 unsigned long serialnr = SN;
 unsigned long serial_pcb = 0;
 
@@ -136,7 +141,7 @@ void RefreshIndex(void) {
   int chan;
 
   for (chan = 0; chan < CH_R_N; chan++) {
-    if (Mode[chan] == LOCAL) {
+    if (Mode[chan] == e_LOCAL) {
       sprintf(buf, "%3d", Index[chan]);
       // todo eso			Display57C(chan,17*6, buf);
     } else {
@@ -196,7 +201,10 @@ int Clear(t_CHANNELS ch) {
 /** Initialize this wwresi component
  *
  */
-WWRESIComponent::WWRESIComponent() {}
+WWRESIComponent::WWRESIComponent() {
+  this->socket_ = nullptr;
+  this->client_ = nullptr;
+}
 
 //---------------------------------------------------------------------------
 /** Free all data:
@@ -205,6 +213,11 @@ WWRESIComponent::WWRESIComponent() {}
 WWRESIComponent::~WWRESIComponent() {
   if (this->socket_) {
     this->socket_->close();
+    this->socket_ = nullptr;
+  }
+  if (this->client_) {
+    this->client_->close();
+    this->client_ = nullptr;
   }
 }
 
@@ -217,6 +230,9 @@ WWRESIComponent::~WWRESIComponent() {
  */
 float WWRESIComponent::get_setup_priority() const { return setup_priority::ETHERNET; }
 
+uint16_t WWRESIComponent::get_port() const { return this->port_; }
+void WWRESIComponent::set_port(uint16_t port) { this->port_ = port; }
+
 //---------------------------------------------------------------------------
 /** prints the user configuration.
  *
@@ -225,13 +241,22 @@ float WWRESIComponent::get_setup_priority() const { return setup_priority::ETHER
  */
 void WWRESIComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "WWRESI:");
+  ESP_LOGCONFIG(TAG, "  Address: %s:%u", network::get_use_address().c_str(), this->port_);
+  ESP_LOGCONFIG(TAG, "  IP Address: %s", network::get_ip_addresses()[0].str().c_str());
+  ESP_LOGCONFIG(TAG, "  IP Address: %s", network::get_ip_addresses()[1].str().c_str());
+  ESP_LOGCONFIG(TAG, "  IP Address: %s", network::get_ip_addresses()[2].str().c_str());
+  ESP_LOGCONFIG(TAG, "  IP Address: %s", network::get_ip_addresses()[3].str().c_str());
+  ESP_LOGCONFIG(TAG, "  IP Address: %s", network::get_ip_addresses()[4].str().c_str());
+  ESP_LOGCONFIG(TAG, "  Hostname: '%s'", App.get_name().c_str());
+
+  // ESP_LOGCONFIG(TAG, "  Address: %s:%u", network::get_ip_addresses()[0].c_str(), this->port_);
   ESP_LOGCONFIG(TAG, "  Firmware Version : %7s", this->firmware_ver_);
-  ESP_LOGCONFIG(TAG, "WWRESI Number:");
+  ESP_LOGCONFIG(TAG, "  Serial Number: ");
 
 #ifdef USE_NUMBER
-  LOG_NUMBER(TAG, "  Timeout:", this->timeout_number_);
+  LOG_NUMBER("", "  Timeout:", this->timeout_number_);
   // LOG_NUMBER(TAG, "  Gate Max Distance:", this->max_gate_distance_number_);
-  LOG_NUMBER(TAG, "  Resistance:", this->resistance_number_);
+  LOG_NUMBER("", "  Resistance:", this->resistance_number_);
   // LOG_NUMBER(TAG, "  Gate Select:", this->gate_select_number_);
   // for (uint8_t gate = 0; gate < LD2420_TOTAL_GATES; gate++) {
   //   LOG_NUMBER(TAG, "  Gate Move Threshold:", this->gate_move_threshold_numbers_[gate]);
@@ -240,10 +265,10 @@ void WWRESIComponent::dump_config() {
 #endif
 
 #ifdef USE_BUTTON
-  LOG_BUTTON(TAG, "  Apply Config:", this->apply_config_button_);
-  LOG_BUTTON(TAG, "  Revert Edits:", this->revert_config_button_);
-  LOG_BUTTON(TAG, "  Factory Reset:", this->factory_reset_button_);
-  LOG_BUTTON(TAG, "  Restart Module:", this->restart_module_button_);
+  LOG_BUTTON("", "  Apply Config:", this->apply_config_button_);
+  LOG_BUTTON("", "  Revert Edits:", this->revert_config_button_);
+  LOG_BUTTON("", "  Factory Reset:", this->factory_reset_button_);
+  LOG_BUTTON("", "  Restart Module:", this->restart_module_button_);
 #endif
 
 #ifdef USE_SELECT
@@ -262,8 +287,62 @@ void WWRESIComponent::dump_config() {
  * Defaults to doing nothing.
  */
 void WWRESIComponent::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up WWRESI...");
-  this->socket_ = socket::socket_ip(SOCK_DGRAM, IPPROTO_IP);
+  ESP_LOGCONFIG(TAG, "Setting up wwresi net...");
+
+  // ----------------------------------------SOCKET TCP
+
+  // this->socket_ = socket::socket_ip(SOCK_DGRAM, 0); // UDP socket
+  this->socket_ = socket::socket_ip(SOCK_STREAM, 0);  // TCP socket
+  if (socket_ == nullptr) {
+    ESP_LOGW(TAG, "  Could not create socket.");
+    this->mark_failed();
+    return;
+  }
+  int enable = 1;
+  int err = socket_->setsockopt(SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
+  if (err != 0) {
+    ESP_LOGW(TAG, "  Socket unable to set reuseaddr: errno %d", err);
+    // we can still continue
+  }
+  err = socket_->setblocking(false);
+  if (err != 0) {
+    ESP_LOGW(TAG, "  Socket unable to set nonblocking mode: errno %d", err);
+    this->mark_failed();
+    return;
+  }
+
+  struct sockaddr_storage server;
+
+  socklen_t sl = socket::set_sockaddr_any((struct sockaddr *) &server, sizeof(server), this->port_);
+  if (sl == 0) {
+    ESP_LOGW(TAG, "  Socket unable to set sockaddr: errno %d", errno);
+    this->mark_failed();  // Mark this component as failed. Any future timeouts/intervals/setup/loop will no longer be
+                          // // called.
+    return;
+  }
+
+  err = this->socket_->bind((struct sockaddr *) &server, sizeof(server));
+  if (err != 0) {
+    ESP_LOGW(TAG, "  Socket unable to bind: errno %d", errno);
+    this->mark_failed();  // Mark this component as failed. Any future timeouts/intervals/setup/loop will no longer be
+                          // // called.
+    return;
+  }
+
+  err = this->socket_->listen(4);
+  if (err != 0) {
+    ESP_LOGW(TAG, "  Socket unable to listen: errno %d", errno);
+    this->mark_failed();
+    return;
+  }
+
+  if (network::is_connected()) {
+    ESP_LOGW(TAG, "  Socket is connected");
+  }
+
+  ESP_LOGCONFIG(TAG, "  done wwresi net");
+
+  // ----------------------------------------
 
   //   if (this->set_config_mode(true) == LD2420_ERROR_TIMEOUT) {
   //     ESP_LOGE(TAG, "WW_MR01 module has failed to respond, check baud rate and serial connections.");
@@ -290,18 +369,16 @@ void WWRESIComponent::setup() {
   //   }
 
   memcpy(&this->new_config, &this->current_config, sizeof(this->current_config));
-//   if (get_firmware_int_(ld2420_firmware_ver_) < CALIBRATE_VERSION_MIN) {
-//     this->set_operating_mode(OP_SIMPLE_MODE_STRING);
-//     this->operating_selector_->publish_state(OP_SIMPLE_MODE_STRING);
-//     this->set_mode_(CMD_SYSTEM_MODE_SIMPLE);
-//     ESP_LOGW(TAG, "LD2420 Frimware Version %s and older are only supported in Simple Mode", ld2420_firmware_ver_);
-//   } else {
-//     this->set_mode_(CMD_SYSTEM_MODE_ENERGY);
-//     this->operating_selector_->publish_state(OP_NORMAL_MODE_STRING);
-//   }
-#ifdef USE_NUMBER
-  this->init_config_numbers();
-#endif
+  //   if (get_firmware_int_(ld2420_firmware_ver_) < CALIBRATE_VERSION_MIN) {
+  //     this->set_operating_mode(OP_SIMPLE_MODE_STRING);
+  //     this->operating_selector_->publish_state(OP_SIMPLE_MODE_STRING);
+  //     this->set_mode_(CMD_SYSTEM_MODE_SIMPLE);
+  //     ESP_LOGW(TAG, "LD2420 Frimware Version %s and older are only supported in Simple Mode", ld2420_firmware_ver_);
+  //   } else {
+  //     this->set_mode_(CMD_SYSTEM_MODE_ENERGY);
+  //     this->operating_selector_->publish_state(OP_NORMAL_MODE_STRING);
+  //   }
+
   //   this->set_system_mode(this->system_mode_);
   //   this->set_config_mode(false);
 
@@ -309,7 +386,7 @@ void WWRESIComponent::setup() {
   this->streams.push_back(new Linebuffer(static_cast<int>(1)));  // fd=1 socket
   this->streams.push_back(new Linebuffer(static_cast<int>(2)));  // fd=2 can
 
-  ESP_LOGCONFIG(TAG, "WWRESI setup complete.");
+  ESP_LOGCONFIG(TAG, "  setup complete.");
 }
 
 //---------------------------------------------------------------------------
@@ -405,23 +482,129 @@ void WWRESIComponent::loop() {
 /// @brief read new command from interfaces uart,eth,can
 void WWRESIComponent::get_cmd_new() {
   // If there is a active send command do not process it here, the send command call will handle it.
+
+  this->handle_uart_();
+  this->handle_net_();
+
+  // can data input
+  // todo eso
+}
+
+//---------------------------------------------------------------------------
+void WWRESIComponent::handle_uart_() {
   if (!get_cmd_active_()) {
     // uart data input
-    if (!available())
+    if (available()) {
+      static uint8_t buffer[2048];
+      static uint8_t rx_data;
+      while (available()) {
+        rx_data = this->read();
+        this->readline_(S_UART, rx_data, buffer, sizeof(buffer));
+      }
+    }
+  }
+}
+
+void WWRESIComponent::handle_net_() {
+  uint8_t error_code = 255;
+
+  // eth data input
+  static uint8_t buf[1460];
+
+  struct sockaddr_storage source_addr;
+  socklen_t addr_len = sizeof(source_addr);
+  if (!client_) {
+    client_ = socket_->accept((struct sockaddr *) &source_addr, &addr_len);
+    if (!client_)
       return;
-    static uint8_t buffer[2048];
-    static uint8_t rx_data;
-    while (available()) {
-      rx_data = this->read();
-      this->readline_(rx_data, buffer, sizeof(buffer));
+    ESP_LOGD(TAG, "Socket client accept: %s", client_->getpeername().c_str());
+
+    int enable = 1;
+    if (client_) {
+      int err = client_->setsockopt(IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int));
+      if (err != 0) {
+        ESP_LOGW(TAG, "Socket could not enable tcp nodelay, errno: %d", errno);
+        return;
+      }
+      err = client_->setblocking(FALSE);
+      if (err != 0) {
+        ESP_LOGW(TAG, "Socket could not set nonblocking, errno: %d", errno);
+        return;
+      }
+    }
+  }
+  if (!client_) {
+    ESP_LOGD(TAG, "Socket client null");
+    return;
+  }
+
+  // if (!this->readall_(buf, 5)) {
+  //   ESP_LOGW(TAG, "Reading magic bytes failed!");
+  //   goto error;
+  // }
+
+  // std::string addr;
+  // ssize_t len1 = this->client_->recvfrom(buf, sizeof(buf),(struct sockaddr *) &source_addr, &addr_len);
+  // ESP_LOGD(TAG, "client recvfrom: %d", len1);
+
+  static uint8_t rx_data;
+  int i;
+
+  ssize_t len = this->client_->read(buf, sizeof(buf));
+  // ssize_t len = this->client_->read(buf, 1);
+  if (len > 0) {
+    ESP_LOGD(TAG, "Socket read: len %d", len);
+
+    for (i = 0; i < len; i++) {
+      ESP_LOGD(TAG, "Socket read: %d - %c", buf[i], ((char *) buf)[i]);
+
+      rx_data = buf[i];
+      this->readline_(S_NET, rx_data, buf, sizeof(buf));
+    }
+  }
+
+  return;
+
+// todo eso
+error:
+  //     buf[0] = static_cast<uint8_t>(error_code);
+  //  // this->writeall_(buf, 1);
+  this->client_->close();
+  this->client_ = nullptr;
+
+  ESP_LOGD(TAG, "error end ..............1");
+}
+
+bool WWRESIComponent::readall_(uint8_t *buf, size_t len) {
+  uint32_t start = millis();
+  uint32_t at = 0;
+  while (len - at > 0) {
+    uint32_t now = millis();
+    if (now - start > 1000) {
+      ESP_LOGW(TAG, "Timed out reading %d bytes of data", len);
+      return false;
     }
 
-    // eth data input
-    // todo eso
-
-    // can data input
-    // todo eso
+    ssize_t read = this->client_->read(buf + at, len - at);
+    if (read == -1) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        App.feed_wdt();
+        delay(1);
+        continue;
+      }
+      ESP_LOGW(TAG, "Failed to read %d bytes of data, errno: %d", len, errno);
+      return false;
+    } else if (read == 0) {
+      ESP_LOGW(TAG, "Remote closed connection");
+      return false;
+    } else {
+      at += read;
+    }
+    App.feed_wdt();
+    delay(1);
   }
+
+  return true;
 }
 
 //---------------------------------------------------------------------------
@@ -447,7 +630,7 @@ void WWRESIComponent::get_read_DIN() {
 void WWRESIComponent::transition_mode(int chan, enum e_MODE mode) {
   Index[chan] = 0;
   Mode[chan] = mode;
-  if (mode == LOCAL) {
+  if (mode == e_LOCAL) {
     ValCurrent[chan] = ValVirtual[chan][Index[chan]];
   } else {
     ValCurrent[chan] = ValSet[chan];
@@ -486,7 +669,7 @@ void WWRESIComponent::stateMachine_DIN(void) {
 /// @param chan
 /// @param transition
 void WWRESIComponent::transition_DIN(int chan, int transition) {
-  if (Mode[chan] != LOCAL) {
+  if (Mode[chan] != e_LOCAL) {
     return;
   }
   // specification rev 0.6 Table 6
@@ -564,7 +747,7 @@ int WWRESIComponent::calculate_relays(int value, unsigned char relays[RESI_RELAY
   } else {
     relays[3] ^= 0x08;  // mr01 K28
   }
-  
+
   if (debug) {
     std::ostringstream dbgstr;
     dbgstr << "relays = " << std::hex << (int) relays[3] << " " << (int) relays[2] << " " << (int) relays[1] << " "
@@ -639,16 +822,16 @@ void WWRESIComponent::set_r_channel(int chan, double r) {
 /// @param rx_data
 /// @param buffer
 /// @param len
-void WWRESIComponent::readline_(int rx_data, uint8_t *buffer, int len) {
+void WWRESIComponent::readline_(int streamNr, int rx_data, uint8_t *buffer, int len) {
   static int pos = 0;
 
   if (rx_data > 0) {
-    // ESP_LOGD(TAG, "rx: %02x", rx_data);
+    ESP_LOGD(TAG, "rx: %02x", rx_data);
     switch (rx_data) {
-      case '\r':  // Ignore LF 0x0a
+      case '\r':   // Return  CR 0x0d 13
         break;
-      case '\n':  // Return on CR 0x0d
-        addCommandToStream_(S_UART, buffer, pos);
+      case '\n':  // Ignore LF 0x0a 10
+        addCommandToStream_(streamNr, buffer, pos);
         pos = 0;  // Reset position index ready for next time
         buffer[pos] = 0;
         break;
@@ -680,7 +863,7 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
 
   str = (*it)->Line;
   if (debug) {
-    ESP_LOGD("wwresi", "new cmd  %s from %d", str.c_str(), streamNr);
+    ESP_LOGD(TAG, "new cmd '%s' from %d", str.c_str(), streamNr);
   }
 
   if (str.length() == 0) {
@@ -688,21 +871,21 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
   }
 
   switch (streamNr) {
-    case 0:
+    case 0:  // uart
       handleCommand(streamNr, (*it), str);
       break;
 
-    case 1:
+    case 1:  // net
       handleCommand(streamNr, (*it), str);
       break;
 
-    case 2:
+    case 2:  // can
       handleCommand(streamNr, (*it), str);
       break;
 
     default:
       if (debug) {
-        ESP_LOGD("wwresi", "Unknown input stream  %d", streamNr);
+        ESP_LOGD(TAG, "Unknown input stream  %d", streamNr);
       }
       break;
   }
@@ -783,7 +966,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     }
   }
   if (debug) {
-    ESP_LOGD("wwresi", "cmd: %s - chan %s - value %s - unit %c", cmd.c_str(), chan.c_str(), value.c_str(), unitch);
+    ESP_LOGD(TAG, "cmd: %s - chan %s - value %s - unit %c", cmd.c_str(), chan.c_str(), value.c_str(), unitch);
   }
   //--- set and load command .........................
   if (cmd == "SET" || cmd == "LOAD") {
@@ -796,7 +979,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     if (value != "") {
       if ((channels & (CH(CH_R0) | CH(CH_R1))) && (channels & CH(CH_DOUT))) {
         // this will never happen in ParseChannel
-        ESP_LOGE("wwresi", "HandleCommand ParseChannel problem %s %d", chan.c_str(), channels);
+        ESP_LOGE(TAG, "HandleCommand ParseChannel problem %s %d", chan.c_str(), channels);
         ack << "ERR " << stream->m_fd << " channel\n";
         ack << line << "\n";
         goto error_jump;
@@ -815,7 +998,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
         }
         val = strtod(value.c_str(), &end_ptr) * unit;
         if (debug) {
-          ESP_LOGD("wwresi", "val %.0f - value %s - unit %c", val, value.c_str(), unitch);
+          ESP_LOGD(TAG, "val %.0f - value %s - unit %c", val, value.c_str(), unitch);
         }
         if (ResiType & RESI_T_KM) {
           if (val < 0.0) {
@@ -898,7 +1081,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
           switch (i) {
             case CH_R0:
             case CH_R1:
-              if (Mode[i] != LOCAL) {
+              if (Mode[i] != e_LOCAL) {
                 ValSet[i] = ValLoad[i];
                 ValCurrent[i] = ValSet[i];
                 set_r_channel_number(i, ValCurrent[i]);
@@ -947,7 +1130,9 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
       }
       // printACK(ack.str()); //temp
     }
+
   } else if (cmd == "CLEAR") {
+    // --------------------------------------------------CLEAR
     channels = parse_channel(chan);
     if (channels == CH_INVALID) {
       ack << "ERR " << stream->m_fd << " invalid channel CLEAR\n";
@@ -961,7 +1146,9 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
       goto error_jump;
     }
     ack << "OK " << stream->m_fd << "\nCLEAR " << chan << "\n";
+
   } else if (cmd == "GET") {
+    // --------------------------------------------------GET
     channels = parse_channel(chan);
     if (channels == CH_INVALID) {
       ack << "ERR " << stream->m_fd << " invalid channel GET\n";
@@ -974,8 +1161,7 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
         switch (i) {
           case CH_R0:
           case CH_R1:
-            ack << "SET " << i << " " << ValCurrent[i] << "\n";
-            // todo eso            cout << "val : " << ValCurrent[i] << "\n";
+            ack << "SET " << i << " " << (unsigned long) ValCurrent[i] << "\n";
             break;
           case CH_R0V:
           case CH_R1V:
@@ -993,13 +1179,15 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
         }
       }
     }
+
   } else if (cmd == "MODE") {
+    // --------------------------------------------------MODE
     if (chan == "LOCAL") {
-      Mode[CH_R0] = Mode[CH_R1] = LOCAL;
+      Mode[CH_R0] = Mode[CH_R1] = e_LOCAL;
       transition_mode(CH_R0, Mode[CH_R0]);
       transition_mode(CH_R1, Mode[CH_R1]);
     } else if (chan == "REMOTE") {
-      Mode[CH_R0] = Mode[CH_R1] = REMOTE;
+      Mode[CH_R0] = Mode[CH_R1] = e_REMOTE;
       transition_mode(CH_R0, Mode[CH_R0]);
       transition_mode(CH_R1, Mode[CH_R1]);
     } else if (chan == "") {
@@ -1010,12 +1198,14 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     }
     ack << "OK " << stream->m_fd << "\n";
     ack << "MODE ";
-    ack << ((Mode[CH_R0] == LOCAL) ? "LOCAL" : "REMOTE");
+    ack << ((Mode[CH_R0] == e_LOCAL) ? "LOCAL" : "REMOTE");
     ack << "\n";
     // CHANGE removed in V3.3 as not in spec FL01DE0000-00088-19/4
     // ack << "SET 0 "<< ValCurrent[0]<<"\n";
     // ack << "SET 1 "<< ValCurrent[1]<<"\n";
+
   } else if (cmd == "IP") {
+    // --------------------------------------------------IP
     string gateway;
     input >> gateway;
 
@@ -1038,15 +1228,21 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     Changed(true);
     ack << "OK " << stream->m_fd << "\n";
     ack << "IP " << ValIpAddr << " " << ValIpNetmask << " " << ValIpGateway << "\n";
+
   } else if (cmd == "RST" || cmd == "QUIT" || cmd == "EXIT") {
+    // --------------------------------------------------RST
     ack << "OK " << stream->m_fd << "\nRST\n";
     do_modul_restart = true;
+
   } else if (cmd == "ECHO") {
+    // --------------------------------------------------ECHO
     val = strtol(chan.c_str(), &end_ptr, 10);
     ack << "OK " << stream->m_fd << "\nECHO ";
     stream->m_flags = val;
     ack << stream->m_flags << "\n";
+
   } else if (cmd == "TYPE") {
+    // --------------------------------------------------TYPE
     ack << "OK " << stream->m_fd << "\nTYPE ";
     if (ResiType & RESI_T_KM) {
       ack << "RESI 4 2.6M\n";
@@ -1060,7 +1256,9 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     // }
     ack << "SW " << version << "\n";
     ack << "SN " << serialnr << "\n";
+
   } else if (cmd == "CFRAME") {
+    // --------------------------------------------------CFRAME
     string ident_length = chan;
     if (ident_length == "29") {
       ext = 1;
@@ -1077,7 +1275,9 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     }
     ack << "OK " << stream->m_fd << "\n";
     ack << "CFRAME " << (ext ? "29" : "11") << "\n";
+
   } else if (cmd == "CBAUDRATE") {
+    // --------------------------------------------------CBAUDRATE
     int ret;
     if (chan != "") {
       int n = atoi(chan.c_str());
@@ -1097,7 +1297,9 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     ack << "OK " << stream->m_fd << "\n";
     ack << "CBAUDRATE " << can_bitrate << "\n";
     // Changed(true);
+
   } else if (cmd == "CRID") {
+    // --------------------------------------------------CRID
     if (chan != "") {
       int getRID = atoi(chan.c_str());
       if (getRID < 0 || getRID > can_identifier) {
@@ -1110,7 +1312,9 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     }
     ack << "OK " << stream->m_fd << "\n";
     ack << "CRID " << rid << "\n";
+
   } else if (cmd == "CBRID") {
+    // --------------------------------------------------CRID
     if (chan != "") {
       int getBRID = atoi(chan.c_str());
       if (getBRID < 0 || getBRID > can_identifier) {
@@ -1123,7 +1327,9 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     }
     ack << "OK " << stream->m_fd << "\n";
     ack << "CBRID " << brid << "\n";
+
   } else if (cmd == "CTID") {
+    // --------------------------------------------------CRID
     if (chan != "") {  // chan here is ID
       int getTID = atoi(chan.c_str());
       if (getTID < 0 || getTID > can_identifier) {
@@ -1137,23 +1343,36 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     }
     ack << "OK " << stream->m_fd << "\n";
     ack << "CTID " << tid << "\n";
+
   } else if (cmd == "VERSION") {
+    // --------------------------------------------------VERSION
     // ignore
+
   } else if (cmd == "CONFIG") {
+    // --------------------------------------------------CONFIG
     // TODO switch to quiet (no-ack) mode
+
   } else if (cmd == "END") {
+    // --------------------------------------------------END
     // TODO switch to normal ACK mode
+
   } else if (cmd == "SAVE") {
+    // --------------------------------------------------SAVE
     // todo eso    WriteConfig();
     // todo eso    SaveConfig(0);
-
     ack << "OK " << stream->m_fd << "\n";
     ack << "SAVE\n";
+
   } else if (cmd[0] == '#') {
+    // --------------------------------------------------#
     // comment line, ignore
+
   } else if (cmd.length() == 0) {
+    // --------------------------------------------------
     // empty line, ignore
+
   } else {
+    // --------------------------------------------------
     ack << "ERR " << stream->m_fd << " unknown command\n";
     ack << line << "\n";
   }
@@ -1191,7 +1410,9 @@ void WWRESIComponent::writeToAll(const string &str, Linebuffer::flags dest) {
         // code
         write_str((str.data()));
         break;
+      case 1:  // net
 
+        break;
       default:
         break;
     }

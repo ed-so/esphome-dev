@@ -13,6 +13,9 @@
 #include <list>
 
 #include "esphome/core/defines.h"
+
+#include "esp_netif.h"
+
 #ifdef USE_BINARY_SENSOR
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #endif
@@ -47,7 +50,6 @@ using std::string;  // std::cin, std::cout, std::endl; // C++17 or later
 namespace esphome {
 namespace wwresi {
 
-static const char *const TAG = "wwresi";
 
 static const uint8_t WW_MR01_TOTAL_GATES = 16;
 static const uint16_t FACTORY_TIMEOUT = 120;
@@ -77,7 +79,7 @@ enum {
   RESI_RELAYS_BITS = 24,
 };
 
-enum e_MODE { REMOTE = 0, LOCAL = 1 };
+enum e_MODE { e_REMOTE = 0, e_LOCAL = 1 };
 
 enum e_CHANNELS {
   CH_R0 = 0,
@@ -183,6 +185,12 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   // #ifdef USE_SELECT
   //   void set_operating_mode_select(select::Select *selector) { this->operating_selector_ = selector; };
   // #endif
+
+  /// Manually set the port OTA should listen on.
+  void set_port(uint16_t port);
+
+  uint16_t get_port() const;
+
 
 #ifdef USE_NUMBER
   void set_timeout_number(number::Number *number) { this->timeout_number_ = number; };
@@ -302,7 +310,10 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 
 
  protected:
-  std::unique_ptr<socket::Socket> socket_;
+  std::unique_ptr<socket::Socket> socket_ = nullptr;
+  std::unique_ptr<socket::Socket> client_ = nullptr;
+  uint16_t port_{43007};
+
 
   //   struct CmdReplyT {
   //     uint8_t command;
@@ -325,6 +336,11 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   //   uint16_t get_distance_() { return this->distance_; };
   //   void set_distance_(uint16_t distance) { this->distance_ = distance; };
   void get_cmd_new();
+
+  void handle_uart_();
+  void handle_net_();
+  bool readall_(uint8_t *buf, size_t len); 
+
   bool get_cmd_active_() { return this->cmd_active_; };
   void set_cmd_active_(bool active) { this->cmd_active_ = active; };
   //   void handle_simple_mode_(const uint8_t *inbuf, int len);
@@ -361,7 +377,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   t_Linebuffer_List streams;
 
   void get_read_DIN();
-  void readline_(int rx_data, uint8_t *buffer, int len);
+  void readline_(int streamNr, int rx_data, uint8_t *buffer, int len);
 
   void addCommandToStream_(int streamNr, uint8_t *buffer, int len);
   void handle_string_command_(std::string str);

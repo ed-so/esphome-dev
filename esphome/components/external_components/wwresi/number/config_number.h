@@ -3,6 +3,7 @@
 #include "esphome/components/number/number.h"
 #include "../wwresi.h"
 
+
 namespace esphome {
 namespace wwresi {
 

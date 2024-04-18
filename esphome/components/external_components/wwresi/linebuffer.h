@@ -1,4 +1,4 @@
-/** \file Linebuffer.h buffer and split text line oriented messages
+/* * \file Linebuffer.h buffer and split text line oriented messages
  */
 #pragma once
 
@@ -9,6 +9,7 @@
 #include "esphome/core/defines.h"
 
 //#include "wwresi.h"
+
 
 namespace esphome {
 namespace wwresi {

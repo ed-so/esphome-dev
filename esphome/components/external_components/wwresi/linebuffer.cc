@@ -1,4 +1,4 @@
-/** \file line-buffer.cc buffer and split text line oriented messages
+/* * \file line-buffer.cc buffer and split text line oriented messages
 
 DESIGN:
 each connection should have an buffer object associated with it. It will be based on stringstream

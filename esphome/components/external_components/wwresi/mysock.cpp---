@@ -1,0 +1,48 @@
+#include "esphome.h"
+#include "esphome/components/socket/socket.h"
+#include "esphome/core/component.h"
+
+#include "esphome/core/defines.h"
+
+#include "esp_netif.h"
+
+//#include <WiFi.h> // Wenn Sie WLAN verwenden
+//#include <WiFiClient.h> // Wenn Sie WLAN verwenden
+#include <Ethernet.h> // Wenn Sie LAN verwenden
+#include <EthernetClient.h> // Wenn Sie LAN verwenden
+//#include <ETH.h>
+
+namespace esphome {
+namespace mysocket {
+
+
+class SocketAvailabilitySensor : public Component, public PollingComponent {
+public:
+  void setup() override {
+    // Hier können Sie den Ethernet-Client initialisieren und eine Verbindung zum Server herstellen
+    ethernet_client_ = EthernetClient();
+    ethernet_client_.connect(server_ip_, server_port_);
+  }
+
+  void update() override {
+    if (ethernet_client_.available()) {
+      // Daten im Socket verfügbar
+      // Hier können Sie entsprechend reagieren, wenn Daten verfügbar sind
+    } else {
+      // Keine Daten im Socket
+    }
+  }
+
+  void set_server_ip(const IPAddress &ip) { server_ip_ = ip; }
+  void set_server_port(uint16_t port) { server_port_ = port; }
+
+private:
+  IPAddress server_ip_;
+  uint16_t server_port_;
+  EthernetClient ethernet_client_;
+};
+
+}  // namespace mysocket
+}  // namespace esphome
+
+
