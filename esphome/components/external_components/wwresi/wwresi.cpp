@@ -491,6 +491,7 @@ void WWRESIComponent::get_cmd_new() {
 }
 
 //---------------------------------------------------------------------------
+/// @brief
 void WWRESIComponent::handle_uart_() {
   if (!get_cmd_active_()) {
     // uart data input
@@ -505,14 +506,13 @@ void WWRESIComponent::handle_uart_() {
   }
 }
 
+//---------------------------------------------------------------------------
+/// @brief
 void WWRESIComponent::handle_net_() {
-  uint8_t error_code = 255;
-
-  // eth data input
-  static uint8_t buf[1460];
 
   struct sockaddr_storage source_addr;
   socklen_t addr_len = sizeof(source_addr);
+
   if (!client_) {
     client_ = socket_->accept((struct sockaddr *) &source_addr, &addr_len);
     if (!client_)
@@ -538,41 +538,28 @@ void WWRESIComponent::handle_net_() {
     return;
   }
 
-  // if (!this->readall_(buf, 5)) {
-  //   ESP_LOGW(TAG, "Reading magic bytes failed!");
-  //   goto error;
-  // }
-
-  // std::string addr;
-  // ssize_t len1 = this->client_->recvfrom(buf, sizeof(buf),(struct sockaddr *) &source_addr, &addr_len);
-  // ESP_LOGD(TAG, "client recvfrom: %d", len1);
-
+  // eth data input
+  static uint8_t eth_buf[1460];
+  // cmd buffer
+  static uint8_t buffer[2048];
   static uint8_t rx_data;
-  int i;
 
-  ssize_t len = this->client_->read(buf, sizeof(buf));
+  ssize_t len = this->client_->read(eth_buf, sizeof(eth_buf));
   // ssize_t len = this->client_->read(buf, 1);
   if (len > 0) {
-    ESP_LOGD(TAG, "Socket read: len %d", len);
+    if (debug) {
+      (TAG, "Socket read: len %d", len);
+    }
 
-    for (i = 0; i < len; i++) {
-      ESP_LOGD(TAG, "Socket read: %d - %c", buf[i], ((char *) buf)[i]);
+    for (int i = 0; i < len; i++) {
+      if (debug) {
+        ESP_LOGD(TAG, "Socket read: %d - %c", eth_buf[i], ((char *) eth_buf)[i]);
+      }
 
-      rx_data = buf[i];
-      this->readline_(S_NET, rx_data, buf, sizeof(buf));
+      rx_data = eth_buf[i];
+      this->readline_(S_NET, rx_data, buffer, sizeof(buffer));
     }
   }
-
-  return;
-
-// todo eso
-error:
-  //     buf[0] = static_cast<uint8_t>(error_code);
-  //  // this->writeall_(buf, 1);
-  this->client_->close();
-  this->client_ = nullptr;
-
-  ESP_LOGD(TAG, "error end ..............1");
 }
 
 bool WWRESIComponent::readall_(uint8_t *buf, size_t len) {
@@ -617,8 +604,8 @@ void WWRESIComponent::get_read_DIN() {
   if (ret == RecentDIN) {
     return;
   }
-  ack << "OK\nGET DIN " << (ret & DIN_MASK) << "\n\r\n";
-  writeToAll(ack.str(), Linebuffer::F_ECHO_DIN);
+  // eso  ack << "OK\nGET DIN " << (ret & DIN_MASK) << "\n\r\n";
+  // eso  writeToAll(ack.str());
   ValCurrent[CH_DIN] = RecentDIN = ret;
   // todo eso RefreshLcdDIN();
 }
@@ -824,11 +811,10 @@ void WWRESIComponent::set_r_channel(int chan, double r) {
 /// @param len
 void WWRESIComponent::readline_(int streamNr, int rx_data, uint8_t *buffer, int len) {
   static int pos = 0;
-
   if (rx_data > 0) {
-    ESP_LOGD(TAG, "rx: %02x", rx_data);
+    if (debug) {ESP_LOGD(TAG, "rx: %02x", rx_data);}
     switch (rx_data) {
-      case '\r':   // Return  CR 0x0d 13
+      case '\r':  // Return  CR 0x0d 13
         break;
       case '\n':  // Ignore LF 0x0a 10
         addCommandToStream_(streamNr, buffer, pos);
@@ -846,6 +832,7 @@ void WWRESIComponent::readline_(int streamNr, int rx_data, uint8_t *buffer, int 
 
 //---------------------------------------------------------------------------
 /// @brief convert uint8_t array to string, add to Stringstream append newline, call handleCommand
+/// @param streamNr
 /// @param buffer
 /// @param len
 void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len) {
@@ -863,36 +850,20 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
 
   str = (*it)->Line;
   if (debug) {
-    ESP_LOGD(TAG, "new cmd '%s' from %d", str.c_str(), streamNr);
+    ESP_LOGD(TAG, "new cmd '%s' from %d", str.c_str(), (*it)->m_fd);
   }
 
   if (str.length() == 0) {
     return;
   }
 
-  switch (streamNr) {
-    case 0:  // uart
-      handleCommand(streamNr, (*it), str);
-      break;
-
-    case 1:  // net
-      handleCommand(streamNr, (*it), str);
-      break;
-
-    case 2:  // can
-      handleCommand(streamNr, (*it), str);
-      break;
-
-    default:
-      if (debug) {
-        ESP_LOGD(TAG, "Unknown input stream  %d", streamNr);
-      }
-      break;
-  }
+  handleCommand((*it)->m_fd, (*it), str);
 }
 
 //==========================================================================================================
-
+/// @brief check given channels correct
+/// @param chan 
+/// @return class t_CHANNELS
 t_CHANNELS WWRESIComponent::parse_channel(string &chan) {
   t_CHANNELS channels = 0;
   const char *str = chan.data();
@@ -940,7 +911,7 @@ t_CHANNELS WWRESIComponent::parse_channel(string &chan) {
 /// @param stream
 /// @param line
 /// @return
-int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, string &line) {
+int WWRESIComponent::handleCommand(int sNr, class Linebuffer *stream, string &line) {
   char unitch = ' ';
   bool do_modul_restart = false;
   std::ostringstream ack;
@@ -1234,12 +1205,12 @@ int WWRESIComponent::handleCommand(int streamNr, class Linebuffer *stream, strin
     ack << "OK " << stream->m_fd << "\nRST\n";
     do_modul_restart = true;
 
-  } else if (cmd == "ECHO") {
-    // --------------------------------------------------ECHO
-    val = strtol(chan.c_str(), &end_ptr, 10);
-    ack << "OK " << stream->m_fd << "\nECHO ";
-    stream->m_flags = val;
-    ack << stream->m_flags << "\n";
+    // } else if (cmd == "ECHO") {
+    //   // --------------------------------------------------ECHO
+    //   val = strtol(chan.c_str(), &end_ptr, 10);
+    //   ack << "OK " << stream->m_fd << "\nECHO ";
+    //   stream->m_flags = val;
+    //   ack << stream->m_flags << "\n";
 
   } else if (cmd == "TYPE") {
     // --------------------------------------------------TYPE
@@ -1384,7 +1355,7 @@ error_jump:
     ESP_LOGD(TAG, "ack: %s", ack.str().c_str());
   }
 
-  writeToAll(ack.str(), Linebuffer::F_ECHO_OTHER);
+  writeTo(stream->m_fd, ack.str());
 
   // eso check it ??????
 
@@ -1401,24 +1372,27 @@ error_jump:
   return 0;
 }
 
-void WWRESIComponent::writeToAll(const string &str, Linebuffer::flags dest) {
-  t_Linebuffer_List::iterator i;
-  for (i = streams.begin(); i != streams.end(); ++i) {
-    // if ((*i)->m_flags & dest) {
-    switch ((*i)->m_fd) {
-      case 0:  // uart
-        // code
-        write_str((str.data()));
-        break;
-      case 1:  // net
-
-        break;
-      default:
-        break;
-    }
-
-    //////  write((*i)->m_fd, str.data(), str.length());
-    //}
+//---------------------------------------------------------------------------
+/// @brief write ack back to source uart,net can
+/// @param fd 
+/// @param str 
+void WWRESIComponent::writeTo(int fd, const string &str) {
+  switch (fd) {
+    case 0:  // uart
+      write_str((str.data()));
+      break;
+    case 1:  // net
+      if (!client_) {
+        ESP_LOGW(TAG, "Eth client not connected");
+        return;
+      }
+      client_->write(str.data(), str.length());
+      break;
+    case 2:  // can
+      //eso todo
+      break;
+    default:
+      break;
   }
 }
 

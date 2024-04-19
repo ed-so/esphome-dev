@@ -158,7 +158,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   WWRESIComponent();
   ~WWRESIComponent();
 
-  int debug = 1;  // 1;
+  int debug = 0;  // 1;
 
   /** Where the component's initialization should happen.
    *
@@ -385,7 +385,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   t_CHANNELS parse_channel(string &chan) ;
   int handleCommand(int streamNr, class Linebuffer *stream, string &line);
 
-  void writeToAll(const string &str, Linebuffer::flags dest);
+  void writeTo(int fd, const string &str);
 
   void stateMachine_DIN(void);
   void transition_DIN(int chan, int transition);

@@ -24,14 +24,14 @@ class Linebuffer : public std::stringstream {
   Linebuffer(int fd) {
     m_fd = fd;
     m_handler = NULL;
-    m_flags = F_ECHO_DEF;
+    //m_flags = F_ECHO_DEF;
   }
 
   //---------------------------------------------------------------------------
   Linebuffer(int fd, t_HANDLER *handler) {
     m_fd = fd;
     m_handler = handler;
-    m_flags = F_ECHO_DEF;
+    //m_flags = F_ECHO_DEF;
   }
 
   //---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ class Linebuffer : public std::stringstream {
   int debug = 0; //1; 
   std::string Line = "";
   enum bufstate { EMPTY, COMPLETE, INCOMPLETE };
-  enum flags { F_ECHO_DIN = 1, F_ECHO_OTHER = 2, F_ECHO_INDX = 4, F_ECHO_DEF = 0 };
+  //enum flags { F_ECHO_UART = 0, F_ECHO_NET = 1, F_ECHO_CAN = 2, F_ECHO_INDX = 4,  };
 
   //---------------------------------------------------------------------------
   /// @brief add string to stream and call Process....
@@ -130,7 +130,7 @@ class Linebuffer : public std::stringstream {
 
   t_HANDLER *m_handler;
   int m_fd;
-  int m_flags;
+  // int m_flags;
 };
 
 }  // namespace wwresi
