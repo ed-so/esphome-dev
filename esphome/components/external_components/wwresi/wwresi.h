@@ -250,7 +250,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 
   struct RegConfigT {
     int channel{0};
-    int resistance{0};
+    int resistance{-1};
     // uint16_t max_gate{0};
     uint16_t timeout{0};
     //   uint32_t move_thresh[WW_MR01_TOTAL_GATES];
