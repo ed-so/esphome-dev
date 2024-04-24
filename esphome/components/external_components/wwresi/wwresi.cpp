@@ -59,7 +59,7 @@ unsigned long serial_pcb = 0;
 // can mesg. ext
 unsigned int ext = 0;
 unsigned int can_identifier = (1 << 11) - 1;  // std. 536870911 (29 bits) or 2047(11 bits)
-unsigned int can_bitrate = 500;
+unsigned int can_bitrate = 500;               // kbit
 
 // todo eso  canmsg_t rx;
 // todo eso  canmsg_t tx;
@@ -90,6 +90,7 @@ int Index[CH_R_N];
 string ValIpAddr = "";
 string ValIpNetmask = "";
 string ValIpGateway = "";
+
 int ValConfigVersion = -1;
 
 FILE *fLog;
@@ -230,8 +231,9 @@ WWRESIComponent::~WWRESIComponent() {
  */
 float WWRESIComponent::get_setup_priority() const { return setup_priority::ETHERNET; }
 
-uint16_t WWRESIComponent::get_port() const { return this->port_; }
 void WWRESIComponent::set_port(uint16_t port) { this->port_ = port; }
+
+uint16_t WWRESIComponent::get_port() const { return this->port_; }
 
 //---------------------------------------------------------------------------
 /** prints the user configuration.
@@ -283,10 +285,32 @@ void WWRESIComponent::dump_config() {
 //---------------------------------------------------------------------------
 /** Where the component's initialization should happen.
  *
- * Analogous to Arduino's setup(). This method is guaranteed to only be called once.
+ * Analog to Arduino's setup(). This method is guaranteed to only be called once.
  * Defaults to doing nothing.
  */
 void WWRESIComponent::setup() {
+  ESP_LOGCONFIG(TAG, "Setting up wwresi '%s'...", this->resistance_number_->get_name().c_str());
+
+  ESP_LOGCONFIG(TAG, "  Setting up wwresi saved config...");
+
+  this->set_r_channel_number(0,FACTORY_RESISTANCE);
+  //todo eso set all store_ to default
+  switch (this->restore_mode_) {
+    case WWRESI_RESTORE_DEFAULT_OPEN:
+      this->rtc_ = global_preferences->make_preference<int32_t>(this->get_object_id_hash());
+      if (!this->rtc_.load(&this->store_)) {
+        this->set_r_channel_number(0,FACTORY_RESISTANCE);
+      }
+      break;
+    case WWRESI_ALWAYS_OPEN:
+        this->set_r_channel_number(0,FACTORY_RESISTANCE);
+      break;
+  }
+  this->store_.resistor = clamp((int)this->store_.resistor, FACTORY_RESISTANCE, RESI_R_MAX_M);
+  ESP_LOGCONFIG(TAG, "  Set resistor to %d ", this->store_.resistor);
+  this->set_r_channel_number(0,this->store_.resistor);
+  this->store_.first_read = false;
+
   ESP_LOGCONFIG(TAG, "Setting up wwresi net...");
 
   // ----------------------------------------SOCKET TCP
@@ -476,6 +500,23 @@ void WWRESIComponent::revert_config_action() {
 void WWRESIComponent::loop() {
   get_cmd_new();
   get_read_DIN();
+
+
+
+  int resistor = this->store_.resistor;
+
+  if (this->store_.last_read != resistor || this->publish_initial_value_) {
+    if (this->restore_mode_ == WWRESI_RESTORE_DEFAULT_OPEN) {
+      this->rtc_.save(&this->store_);
+      ESP_LOGCONFIG(TAG, "  Save resistor to %d ", resistor);
+    }
+    this->store_.last_read = resistor;
+    this->publish_state(resistor);
+    // this->listeners_.call(resistor);
+    this->publish_initial_value_ = false;
+  }
+
+
 }
 
 //---------------------------------------------------------------------------
@@ -509,7 +550,6 @@ void WWRESIComponent::handle_uart_() {
 //---------------------------------------------------------------------------
 /// @brief
 void WWRESIComponent::handle_net_() {
-
   struct sockaddr_storage source_addr;
   socklen_t addr_len = sizeof(source_addr);
 
@@ -755,6 +795,9 @@ void WWRESIComponent::set_r_channel_number(int chan, double r) {
     this->resistance_number_->publish_state(static_cast<int>(round(r)));
 }
 
+/// @brief
+/// @param chan
+/// @param r
 void WWRESIComponent::set_r_channel_load(int chan, double r) {
   ValLoad[chan] = r;
   ValSet[chan] = ValLoad[chan];
@@ -762,6 +805,7 @@ void WWRESIComponent::set_r_channel_load(int chan, double r) {
   set_r_channel(chan, r);
 }
 
+/// @brief
 void WWRESIComponent::set_resistance_value() { set_r_channel_load(new_config.channel, new_config.resistance); }
 
 //---------------------------------------------------------------------------
@@ -812,7 +856,9 @@ void WWRESIComponent::set_r_channel(int chan, double r) {
 void WWRESIComponent::readline_(int streamNr, int rx_data, uint8_t *buffer, int len) {
   static int pos = 0;
   if (rx_data > 0) {
-    if (debug) {ESP_LOGD(TAG, "rx: %02x", rx_data);}
+    if (debug) {
+      ESP_LOGD(TAG, "rx: %02x", rx_data);
+    }
     switch (rx_data) {
       case '\r':  // Return  CR 0x0d 13
         break;
@@ -862,7 +908,7 @@ void WWRESIComponent::addCommandToStream_(int streamNr, uint8_t *buffer, int len
 
 //==========================================================================================================
 /// @brief check given channels correct
-/// @param chan 
+/// @param chan
 /// @return class t_CHANNELS
 t_CHANNELS WWRESIComponent::parse_channel(string &chan) {
   t_CHANNELS channels = 0;
@@ -1374,8 +1420,8 @@ error_jump:
 
 //---------------------------------------------------------------------------
 /// @brief write ack back to source uart,net can
-/// @param fd 
-/// @param str 
+/// @param fd
+/// @param str
 void WWRESIComponent::writeTo(int fd, const string &str) {
   switch (fd) {
     case 0:  // uart
@@ -1389,7 +1435,7 @@ void WWRESIComponent::writeTo(int fd, const string &str) {
       client_->write(str.data(), str.length());
       break;
     case 2:  // can
-      //eso todo
+      // eso todo
       break;
     default:
       break;
@@ -1398,10 +1444,10 @@ void WWRESIComponent::writeTo(int fd, const string &str) {
 
 //---------------------------------------------------------------------------
 // Sends a restart and set system running mode to normal
-void WWRESIComponent::send_module_restart() { this->wwresi_restart(); }
+void WWRESIComponent::send_module_restart() { this->restart(); }
 
 //---------------------------------------------------------------------------
-void WWRESIComponent::wwresi_restart() {
+void WWRESIComponent::restart() {
   t_Linebuffer_List::iterator i;
   ESP_LOGD(TAG, "Sending restart command");
 

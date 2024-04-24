@@ -50,10 +50,11 @@ using std::string;  // std::cin, std::cout, std::endl; // C++17 or later
 namespace esphome {
 namespace wwresi {
 
-
 static const uint8_t WW_MR01_TOTAL_GATES = 16;
+
 static const uint16_t FACTORY_TIMEOUT = 120;
 static const int FACTORY_RESISTANCE = -1;
+static const int FACTORY_PORT = 43007;
 
 static const int CALIBRATE_VERSION_MIN = 154;
 
@@ -65,14 +66,16 @@ static const int S_CAN = 2;
 // int fdError;
 // int fdIn;
 
-enum {
+static const int RESI_R_MAX_M = 2666665;
+
+
+enum e_RESI{
   RESI_RELAYS_N = 4,
 
   // RESI_R_MAX = 266665,
   // RESI_DECADE_SINGLE_RESISTOR = 200000,
   // RESI_DECADE_MULT_FACT = 10000,
-  
-  RESI_R_MAX_M = 2666665,
+
   RESI_DECADE_SINGLE_RESISTOR_M = 2000000,
   RESI_DECADE_MULT_FACT_M = 100000,
 
@@ -94,14 +97,24 @@ enum e_CHANNELS {
   CH_INVALID = 0x80000000
 };
 
+/// All possible restore modes for the resistor channel
+enum WWRESIRestoreMode {
+  WWRESI_RESTORE_DEFAULT_OPEN,  /// try to restore resistor, otherwise set to open = -1
+  WWRESI_ALWAYS_OPEN,           /// do not restore resistor, always set to open = -1
+};
 
 struct WWRESIFlashData {
+  volatile int32_t last_read{0};
+  bool first_read{true};
+
+  volatile int32_t resistor{-1};
+
   char serial_number[8];
   uint8_t eth_ip_address[4];
   uint8_t eth_ip_mask[4];
   uint8_t eth_ip_gateway[4];
-} PACKED;
 
+} PACKED;
 
 class WWRESIListener {
  public:
@@ -112,7 +125,6 @@ class WWRESIListener {
 };
 
 class t_CHANNELS;
-
 
 //--------------------------------------------------------------------------------------------------------------
 /// @brief class storing bitmask of active channels (up to 15 bits) in bits 16..30 of 32 bit uint and "virtual channel"
@@ -152,8 +164,7 @@ class t_CHANNELS {
   operator int() { return chn; }
 };
 
-
-class WWRESIComponent : public Component, public uart::UARTDevice {
+class WWRESIComponent : public sensor::Sensor, public Component, public uart::UARTDevice {
  public:
   WWRESIComponent();
   ~WWRESIComponent();
@@ -186,11 +197,10 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   //   void set_operating_mode_select(select::Select *selector) { this->operating_selector_ = selector; };
   // #endif
 
-  /// Manually set the port OTA should listen on.
+  // Manually set the port RESI should listen on.
   void set_port(uint16_t port);
 
   uint16_t get_port() const;
-
 
 #ifdef USE_NUMBER
   void set_timeout_number(number::Number *number) { this->timeout_number_ = number; };
@@ -304,15 +314,24 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   //   void set_reg_value(uint16_t reg, uint16_t value);
   //   uint8_t set_config_mode(bool enable);
   //   void set_system_mode(uint16_t mode);
-  void wwresi_restart();
+  void restart();
 
   void set_resistance_value();
 
 
+
  protected:
+  // ETH client/server socket
   std::unique_ptr<socket::Socket> socket_ = nullptr;
   std::unique_ptr<socket::Socket> client_ = nullptr;
-  uint16_t port_{43007};
+  uint16_t port_{FACTORY_PORT};
+
+  ESPPreferenceObject rtc_;  // Preference.h
+  WWRESIRestoreMode restore_mode_{WWRESI_RESTORE_DEFAULT_OPEN};
+  bool publish_initial_value_{false};
+
+  WWRESIFlashData store_;  // flash read/write
+
 
 
   //   struct CmdReplyT {
@@ -339,7 +358,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
 
   void handle_uart_();
   void handle_net_();
-  bool readall_(uint8_t *buf, size_t len); 
+  bool readall_(uint8_t *buf, size_t len);
 
   bool get_cmd_active_() { return this->cmd_active_; };
   void set_cmd_active_(bool active) { this->cmd_active_ = active; };
@@ -382,7 +401,7 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   void addCommandToStream_(int streamNr, uint8_t *buffer, int len);
   void handle_string_command_(std::string str);
 
-  t_CHANNELS parse_channel(string &chan) ;
+  t_CHANNELS parse_channel(string &chan);
   int handleCommand(int streamNr, class Linebuffer *stream, string &line);
 
   void writeTo(int fd, const string &str);
@@ -395,7 +414,6 @@ class WWRESIComponent : public Component, public uart::UARTDevice {
   void set_r_channel(int chan, double r);
   void set_r_channel_number(int chan, double r);
   void set_r_channel_load(int chan, double r);
-
 };
 
 }  // namespace wwresi
