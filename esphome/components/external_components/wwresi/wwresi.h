@@ -84,18 +84,25 @@ enum e_RESI{
 
 enum e_MODE { e_REMOTE = 0, e_LOCAL = 1 };
 
+enum e_CONSTANTS { INDEX_MAX = 256, DEBOUNCE_DIN = 20000 };
+
+
 enum e_CHANNELS {
   CH_R0 = 0,
-  CH_R1 = 1,
+  //CH_R1 = 1,
   CH_R_N = 2,
   CH_DOUT = 2,
   CH_DIN = 3,
   CH_R0V = 4,
-  CH_R1V = 5,
+  //CH_R1V = 5,
 
   CH_N,
   CH_INVALID = 0x80000000
 };
+
+
+
+
 
 /// All possible restore modes for the resistor channel
 enum WWRESIRestoreMode {
@@ -104,9 +111,10 @@ enum WWRESIRestoreMode {
 };
 
 struct WWRESIFlashData {
-  volatile int32_t last_read{0};
   bool first_read{true};
+  float timeout{15};
 
+  volatile int32_t last_resistor{0};
   volatile int32_t resistor{-1};
 
   char serial_number[8];
@@ -115,6 +123,17 @@ struct WWRESIFlashData {
   uint8_t eth_ip_gateway[4];
 
 } PACKED;
+
+
+  struct RegConfigT {
+    int channel{0};
+    int resistor{-1};
+    // uint16_t max_gate{0};
+    uint16_t timeout{0};
+    //   uint32_t move_thresh[WW_MR01_TOTAL_GATES];
+    //   uint32_t still_thresh[WW_MR01_TOTAL_GATES];
+  };
+
 
 class WWRESIListener {
  public:
@@ -169,7 +188,7 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
   WWRESIComponent();
   ~WWRESIComponent();
 
-  int debug = 0;  // 1;
+  int debug = 1;  // 1;
 
   /** Where the component's initialization should happen.
    *
@@ -237,7 +256,6 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
   // };
 
   void init_config_numbers();
-  void refresh_config_numbers();
 #endif
 
 #ifdef USE_BUTTON
@@ -249,23 +267,7 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
 
   void register_listener(WWRESIListener *listener) { this->listeners_.push_back(listener); }
 
-  //  struct CmdFrameT {
-  //    uint32_t header{0};
-  //    uint16_t length{0};
-  //    uint16_t command{0};
-  //    uint8_t data[18];
-  //    uint16_t data_length{0};
-  //    uint32_t footer{0};
-  //  };
 
-  struct RegConfigT {
-    int channel{0};
-    int resistance{-1};
-    // uint16_t max_gate{0};
-    uint16_t timeout{0};
-    //   uint32_t move_thresh[WW_MR01_TOTAL_GATES];
-    //   uint32_t still_thresh[WW_MR01_TOTAL_GATES];
-  };
 
   void send_module_restart();
 
@@ -283,8 +285,11 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
   //   void update_radar_data(uint16_t const *gate_energy, uint8_t sample_number);
   //   uint8_t calc_checksum(void *data, size_t size);
 
-  RegConfigT current_config;
-  RegConfigT new_config;
+  // RegConfigT current_config;
+  // RegConfigT new_config;
+  WWRESIFlashData store;  // flash read/write
+
+
   //   int32_t last_periodic_millis = millis();
   //   int32_t report_periodic_millis = millis();
   //   int32_t monitor_periodic_millis = millis();
@@ -316,7 +321,7 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
   //   void set_system_mode(uint16_t mode);
   void restart();
 
-  void set_resistance_value();
+  void set_resistor_value();
 
 
 
@@ -326,22 +331,14 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
   std::unique_ptr<socket::Socket> client_ = nullptr;
   uint16_t port_{FACTORY_PORT};
 
-  ESPPreferenceObject rtc_;  // Preference.h
+  ESPPreferenceObject nvs_;  // Preference.h
   WWRESIRestoreMode restore_mode_{WWRESI_RESTORE_DEFAULT_OPEN};
   bool publish_initial_value_{false};
 
-  WWRESIFlashData store_;  // flash read/write
+  void config_read_nvs_();
+  void config_write_nvs_();
 
 
-
-  //   struct CmdReplyT {
-  //     uint8_t command;
-  //     uint8_t status;
-  //     uint32_t data[4];
-  //     uint8_t length;
-  //     uint16_t error;
-  //     volatile bool ack;
-  //   };
 
   int get_firmware_int_(const char *version_string);
   void get_firmware_version_();

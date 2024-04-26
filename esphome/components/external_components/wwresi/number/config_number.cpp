@@ -10,13 +10,13 @@ namespace wwresi {
 
 void WWRESITimeoutNumber::control(float timeout) {
   this->publish_state(timeout);
-  this->parent_->new_config.timeout = timeout;
+  this->parent_->store.timeout = timeout;
 }
 
 void WWRESIResistanceNumber::control(float value) {
-  if ((int) value != this->parent_->new_config.resistance) {
-    this->parent_->new_config.resistance = (int) value;
-    this->parent_->set_resistance_value();
+  if ((int) value != this->parent_->store.resistor) {
+    this->parent_->store.resistor = (int) value;
+    this->parent_->set_resistor_value();
   } 
   this->publish_state(value);
 }
