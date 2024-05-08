@@ -9,6 +9,7 @@
 #include "esphome/core/util.h"
 #include "esphome/core/version.h"
 #include "esphome/components/md5/md5.h"
+#include "esphome/components/ethernet/ethernet_component.h"
 
 #include <algorithm>
 
@@ -74,7 +75,6 @@ double ValCurrent[CH_N];
 double ValSet[CH_R_N];
 double ValLoad[CH_N];
 double ValVirtual[CH_R_N][INDEX_MAX];
-
 
 e_MODE Mode[CH_R_N];
 
@@ -278,12 +278,10 @@ void WWRESIComponent::setup() {
 
   config_read_nvs_();
 
-
-
-  this->store.resistor = clamp((int)this->store.resistor, FACTORY_RESISTANCE, RESI_R_MAX_M);
+  this->store.resistor = clamp((int) this->store.resistor, FACTORY_RESISTANCE, RESI_R_MAX_M);
 
   ESP_LOGD(TAG, "  Set resistor to %d ", this->store.resistor);
-  this->set_r_channel_number(0,this->store.resistor);
+  this->set_r_channel_number(0, this->store.resistor);
   this->store.first_read = false;
 
   ESP_LOGCONFIG(TAG, "Setting up wwresi net...");
@@ -335,9 +333,6 @@ void WWRESIComponent::setup() {
     return;
   }
 
-  if (network::is_connected()) {
-    ESP_LOGW(TAG, "  Socket is connected");
-  }
 
   ESP_LOGCONFIG(TAG, "  done wwresi net");
 
@@ -390,14 +385,13 @@ void WWRESIComponent::setup() {
 
 //---------------------------------------------------------------------------
 /// @brief Write TCP port
-/// @param port 
+/// @param port
 void WWRESIComponent::set_port(uint16_t port) { this->port_ = port; }
 
 //---------------------------------------------------------------------------
-/// @brief Read TCP port 
-/// @return 
+/// @brief Read TCP port
+/// @return
 uint16_t WWRESIComponent::get_port() const { return this->port_; }
-
 
 //---------------------------------------------------------------------------
 void WWRESIComponent::apply_config_action() {
@@ -465,17 +459,10 @@ void WWRESIComponent::restart_module_action() {
 
 //---------------------------------------------------------------------------
 void WWRESIComponent::revert_config_action() {
-
 #ifdef USE_NUMBER
   this->init_config_numbers();
 #endif
-
 }
-
-
-
-
-
 
 //---------------------------------------------------------------------------
 /** This method will be called repeatedly.
@@ -488,9 +475,6 @@ void WWRESIComponent::loop() {
   get_read_DIN();
 
   config_write_nvs_();
-  
-
-
 }
 
 //---------------------------------------------------------------------------
@@ -547,6 +531,22 @@ void WWRESIComponent::handle_net_() {
       }
     }
   }
+
+  if (!network::is_connected){
+    ESP_LOGD(TAG, "network disconnect");
+    client_ = NULL;
+    return;
+  }
+
+
+  if (!ethernet::global_eth_component->is_connected()){
+    ESP_LOGD(TAG, "ethernet disconnect");
+    client_ = NULL;
+    return;
+  }
+
+
+
   if (!client_) {
     ESP_LOGD(TAG, "Socket client null");
     return;
@@ -573,6 +573,20 @@ void WWRESIComponent::handle_net_() {
       rx_data = eth_buf[i];
       this->readline_(S_NET, rx_data, buffer, sizeof(buffer));
     }
+  }
+  if (len < 0) {
+    //int err = client_->close();
+      if (debug) {
+        (TAG, "Socket len < 0");
+      }
+    // if (err != 0) {
+    //   if (debug) {
+    //     (TAG, "Socket close error");
+    //   }
+    // }
+    // if (debug) {
+    //   (TAG, "Socket closeed");
+    // }
   }
 }
 
@@ -766,7 +780,7 @@ int WWRESIComponent::calculate_relays(int value, unsigned char relays[RESI_RELAY
 void WWRESIComponent::set_r_channel_number(int chan, double r) {
   set_r_channel_load(chan, r);
 
-    if (this->resistance_number_ != nullptr)
+  if (this->resistance_number_ != nullptr)
     this->resistance_number_->publish_state(static_cast<int>(round(r)));
 }
 
@@ -782,9 +796,7 @@ void WWRESIComponent::set_r_channel_load(int chan, double r) {
 }
 
 /// @brief
-void WWRESIComponent::set_resistor_value() { 
-  set_r_channel_load(0, this->store.resistor); 
-}
+void WWRESIComponent::set_resistor_value() { set_r_channel_load(0, this->store.resistor); }
 
 //---------------------------------------------------------------------------
 /// @brief
@@ -898,8 +910,8 @@ t_CHANNELS WWRESIComponent::parse_channel(string &chan) {
   } else if (chan.length() == 1) {
     if (chan[0] == '0') {
       channels | CH_R0;
-//    } else if (chan == "1") {
-//      channels | CH_R1;
+      //    } else if (chan == "1") {
+      //      channels | CH_R1;
     } else {
       return CH_INVALID;
     }
@@ -914,13 +926,13 @@ t_CHANNELS WWRESIComponent::parse_channel(string &chan) {
       channels.setv(tmp);
       if (str[0] == '0') {
         channels | CH_R0V;
-//      } else if (str[0] == '1') {
-//        channels | CH_R1V;
+        //      } else if (str[0] == '1') {
+        //        channels | CH_R1V;
       } else {
         return CH_INVALID;
       }
     } else if (chan == "ALL") {
-      //channels | CH_R0 | CH_R1;
+      // channels | CH_R0 | CH_R1;
       channels | CH_R0;
     } else if (chan == "DOUT") {
       channels | CH_DOUT;
@@ -981,7 +993,7 @@ int WWRESIComponent::handleCommand(int sNr, class Linebuffer *stream, string &li
         ack << "ERR " << stream->m_fd << " channel\n";
         ack << line << "\n";
         goto error_jump;
-      } else if (channels & (CH(CH_R0) |/* CH(CH_R1) | CH(CH_R1V) |*/ CH(CH_R0V))) {
+      } else if (channels & (CH(CH_R0) | /* CH(CH_R1) | CH(CH_R1V) |*/ CH(CH_R0V))) {
         if (unitch == 'K') {
           unit = 1000;
         } else if (unitch == 'M') {
@@ -1078,7 +1090,7 @@ int WWRESIComponent::handleCommand(int sNr, class Linebuffer *stream, string &li
           // ack << "val "<< value << " ";
           switch (i) {
             case CH_R0:
-            //case CH_R1:
+              // case CH_R1:
               if (Mode[i] != e_LOCAL) {
                 ValSet[i] = ValLoad[i];
                 ValCurrent[i] = ValSet[i];
@@ -1089,7 +1101,7 @@ int WWRESIComponent::handleCommand(int sNr, class Linebuffer *stream, string &li
               }
               break;
             case CH_R0V:
-            //case CH_R1V:
+              // case CH_R1V:
               if (value != "") {
                 ValVirtual[i - CH_R0V][channels & 0xff] = ValLoad[i];
                 Changed(true);
@@ -1114,7 +1126,7 @@ int WWRESIComponent::handleCommand(int sNr, class Linebuffer *stream, string &li
         if (channels & CH(i)) {
           switch (i) {
             case CH_R0:
-            //case CH_R1:
+              // case CH_R1:
               ack << "LOAD " << i << " " << ValLoad[i] << "\n";
               break;
             case CH_DOUT:
@@ -1158,11 +1170,11 @@ int WWRESIComponent::handleCommand(int sNr, class Linebuffer *stream, string &li
       if (channels & CH(i)) {
         switch (i) {
           case CH_R0:
-          //case CH_R1:
+            // case CH_R1:
             ack << "SET " << i << " " << (long) ValCurrent[i] << "\n";
             break;
           case CH_R0V:
-          //case CH_R1V:
+            // case CH_R1V:
             ack << "SET " << i - CH_R0V << "V" << (channels & 0xff) << " " << ValVirtual[i - CH_R0V][channels & 0xff]
                 << "\n";
             break;
@@ -1181,13 +1193,13 @@ int WWRESIComponent::handleCommand(int sNr, class Linebuffer *stream, string &li
   } else if (cmd == "MODE") {
     // --------------------------------------------------MODE
     if (chan == "LOCAL") {
-      Mode[CH_R0] = /*Mode[CH_R1] =*/ e_LOCAL;
+      Mode[CH_R0] = /*Mode[CH_R1] =*/e_LOCAL;
       transition_mode(CH_R0, Mode[CH_R0]);
-      //transition_mode(CH_R1, Mode[CH_R1]);
+      // transition_mode(CH_R1, Mode[CH_R1]);
     } else if (chan == "REMOTE") {
-      Mode[CH_R0] = /*Mode[CH_R1] =*/ e_REMOTE;
+      Mode[CH_R0] = /*Mode[CH_R1] =*/e_REMOTE;
       transition_mode(CH_R0, Mode[CH_R0]);
-      //transition_mode(CH_R1, Mode[CH_R1]);
+      // transition_mode(CH_R1, Mode[CH_R1]);
     } else if (chan == "") {
     } else {
       ack << "ERR " << stream->m_fd << " invalid MODE :" << chan << ":\n";
@@ -1399,7 +1411,7 @@ error_jump:
 }
 
 //---------------------------------------------------------------------------
-//todo can
+// todo can
 /// @brief write ack back to source uart,net can
 /// @param fd
 /// @param str
@@ -1424,7 +1436,7 @@ void WWRESIComponent::writeTo(int fd, const string &str) {
 }
 
 //---------------------------------------------------------------------------
-/// @brief 
+/// @brief
 void WWRESIComponent::restart() {
   t_Linebuffer_List::iterator i;
   ESP_LOGD(TAG, "Sending restart command");
@@ -1444,30 +1456,28 @@ void WWRESIComponent::restart() {
   App.safe_reboot();
 }
 
-
 //---------------------------------------------------------------------------
 /// @brief read store_ from NVS
-void WWRESIComponent::config_read_nvs_(){
-  //todo eso set all store_ to default
+void WWRESIComponent::config_read_nvs_() {
+  // todo eso set all store_ to default
   switch (this->restore_mode_) {
     case WWRESI_RESTORE_DEFAULT_OPEN:
       this->nvs_ = global_preferences->make_preference<int32_t>(this->get_object_id_hash());
       if (!this->nvs_.load(&this->store)) {
         ESP_LOGD(TAG, "  Load error, set to factory ");
         this->store.resistor = FACTORY_RESISTANCE;
-
       }
       break;
     case WWRESI_ALWAYS_OPEN:
-        ESP_LOGD(TAG, "  Set resistor to WWRESI_ALWAYS_OPEN ");
-        this->store.resistor = FACTORY_RESISTANCE;
+      ESP_LOGD(TAG, "  Set resistor to WWRESI_ALWAYS_OPEN ");
+      this->store.resistor = FACTORY_RESISTANCE;
       break;
   }
 }
 
 //---------------------------------------------------------------------------
 /// @brief write store_ do NVS
-void WWRESIComponent::config_write_nvs_(){
+void WWRESIComponent::config_write_nvs_() {
   int resistor = this->store.resistor;
 
   if (this->store.last_resistor != resistor || this->publish_initial_value_) {
@@ -1480,10 +1490,7 @@ void WWRESIComponent::config_write_nvs_(){
     // this->listeners_.call(resistor);
     this->publish_initial_value_ = false;
   }
-
 }
-
-  
 
 //---------------------------------------------------------------------------
 int WWRESIComponent::get_firmware_int_(const char *version_string) { return 0; }
@@ -1499,8 +1506,6 @@ void WWRESIComponent::get_firmware_version_() {
   // ESP_LOGD(TAG, "Sending read firmware version command: %2X", cmd_frame.command);
   //  this->send_cmd_from_array(cmd_frame);
 }
-
-
 
 #ifdef USE_NUMBER
 //---------------------------------------------------------------------------
