@@ -4,12 +4,14 @@
 #include "esphome/components/network/util.h"
 #include "esphome/core/application.h"
 #include "esphome/core/defines.h"
+#include "esphome/core/entity_base.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
 #include "esphome/core/version.h"
 #include "esphome/components/md5/md5.h"
 #include "esphome/components/ethernet/ethernet_component.h"
+
 
 #include <algorithm>
 
@@ -200,8 +202,8 @@ int Clear(t_CHANNELS ch) {
  *
  */
 WWRESIComponent::WWRESIComponent() {
-  this->socket_ = nullptr;
-  //  this->client_ = nullptr;
+  this->server_ = nullptr;
+  this->client_ = nullptr;
 }
 
 //---------------------------------------------------------------------------
@@ -209,14 +211,14 @@ WWRESIComponent::WWRESIComponent() {
  * socket_
  */
 WWRESIComponent::~WWRESIComponent() {
-  if (this->socket_) {
-    this->socket_->close();
-    this->socket_ = nullptr;
+  if (this->server_) {
+    this->server_->close();
+    this->server_ = nullptr;
   }
-  // if (this->client_) {
-  //   this->client_->close();
-  //   this->client_ = nullptr;
-  // }
+  if (this->client_) {
+    this->client_->close();
+    this->client_ = nullptr;
+  }
 }
 
 //---------------------------------------------------------------------------
@@ -226,61 +228,63 @@ WWRESIComponent::~WWRESIComponent() {
  * Defaults to doing nothing.
  */
 void WWRESIComponent::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up Wwresi '%s'...", this->resistance_number_->get_name().c_str());
+  ESP_LOGCONFIG(TAG, "Setting up wwresi '%s'...", this->resistance_number_->get_name().c_str());
 
   config_read_nvs_();
 
+  ESP_LOGD(TAG, "  Set resistor to %d ", this->store.resistor);
+  this->set_r_channel_number(0, this->store.resistor);
+  this->store.first_read = false;
+
   // ----------------------------------------SOCKET TCP
-  ESP_LOGCONFIG(TAG, "  Config net...");
+  ESP_LOGCONFIG(TAG, "Setting up wwresi net...");
 
-  ESP_LOGCONFIG(TAG, "  Set buffer to %d", this->buf_size_);
-
-  this->buf_ = std::unique_ptr<uint8_t[]>{new uint8_t[this->buf_size_]};
-
-  struct sockaddr_storage bind_addr;
-  socklen_t bind_addrlen =
-      socket::set_sockaddr_any(reinterpret_cast<struct sockaddr *>(&bind_addr), sizeof(bind_addr), this->port_);
-  if (bind_addrlen == 0) {
-    ESP_LOGW(TAG, "  Could not set sockaddr.");
-    this->mark_failed();
-    return;
-  }
-  this->socket_ = socket::socket_ip(SOCK_STREAM, PF_INET);
-  if (this->socket_ == nullptr) {
+  // this->socket_ = socket::socket_ip(SOCK_DGRAM, 0); // UDP socket
+  this->server_ = socket::socket_ip(SOCK_STREAM, 0);  // TCP socket
+  if (server_ == nullptr) {
     ESP_LOGW(TAG, "  Could not create socket.");
     this->mark_failed();
     return;
   }
   int enable = 1;
-  int err = this->socket_->setsockopt(SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
+  int err = server_->setsockopt(SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
   if (err != 0) {
     ESP_LOGW(TAG, "  Socket unable to set reuseaddr: errno %d", err);
     // we can still continue
   }
-  err = this->socket_->setblocking(false);
+  err = server_->setblocking(false);
   if (err != 0) {
     ESP_LOGW(TAG, "  Socket unable to set nonblocking mode: errno %d", err);
     this->mark_failed();
     return;
   }
-  err = this->socket_->bind(reinterpret_cast<struct sockaddr *>(&bind_addr), bind_addrlen);
+
+  struct sockaddr_storage server;
+
+  socklen_t sl = socket::set_sockaddr_any((struct sockaddr *) &server, sizeof(server), this->port_);
+  if (sl == 0) {
+    ESP_LOGW(TAG, "  Socket unable to set sockaddr: errno %d", errno);
+    this->mark_failed();  // Mark this component as failed. Any future timeouts/intervals/setup/loop will no longer be
+                          // // called.
+    return;
+  }
+
+  err = this->server_->bind((struct sockaddr *) &server, sizeof(server));
   if (err != 0) {
     ESP_LOGW(TAG, "  Socket unable to bind: errno %d", errno);
     this->mark_failed();  // Mark this component as failed. Any future timeouts/intervals/setup/loop will no longer be
                           // // called.
     return;
   }
-  err = this->socket_->listen(4);
+
+  err = this->server_->listen(4);
   if (err != 0) {
     ESP_LOGW(TAG, "  Socket unable to listen: errno %d", errno);
     this->mark_failed();
     return;
   }
 
-  this->publish_sensor();
-
- 
-  ESP_LOGCONFIG(TAG, "  Done config net...");
+  ESP_LOGCONFIG(TAG, "  done wwresi net");
 
   // ----------------------------------------
 
@@ -326,21 +330,15 @@ void WWRESIComponent::setup() {
   this->streams.push_back(new Linebuffer(static_cast<int>(1)));  // fd=1 socket
   this->streams.push_back(new Linebuffer(static_cast<int>(2)));  // fd=2 can
 
-  ESP_LOGCONFIG(TAG, "  Setup complete.");
+  ESP_LOGCONFIG(TAG, "  setup complete.");
 }
+
+
 
 //---------------------------------------------------------------------------
-/** This method will be called repeatedly.
- *
- * Analogous to Arduino's loop(). setup() is guaranteed to be called before this.
- * Defaults to doing nothing.
- */
-void WWRESIComponent::loop() {
-  get_cmd_new();
-  get_read_DIN();
-
-  config_write_nvs_();
-}
+/// @brief priority of setup(). higher -> executed earlier
+/// @return The setup priority of this component
+float WWRESIComponent::get_setup_priority() const { return setup_priority::ETHERNET; }
 
 //---------------------------------------------------------------------------
 /// @brief prints the user configuration.
@@ -378,34 +376,11 @@ void WWRESIComponent::dump_config() {
 #ifdef USE_SELECT
   // LOG_SELECT(TAG, "  Operating Mode", this->operating_selector_);
 #endif
-#ifdef USE_BINARY_SENSOR
-    LOG_BINARY_SENSOR("  ", "Connected:", this->connected_sensor_);
-#endif
-#ifdef USE_SENSOR
-    LOG_SENSOR("  ", "Connection count:", this->connection_count_sensor_);
-#endif
-
-
   if (this->get_firmware_int_(firmware_ver_) < CALIBRATE_VERSION_MIN) {
     ESP_LOGW(TAG, "WW_MR01 Firmware Version %s and older are only supported in Simple Mode", firmware_ver_);
   }
 }
 
-void WWRESIComponent::on_shutdown() {
-  for (Client &client : this->clients_)
-    client.socket->shutdown(SHUT_RDWR);
-}
-
-void WWRESIComponent::publish_sensor() {
-  #ifdef USE_BINARY_SENSOR
-    if (this->connected_sensor_)
-      this->connected_sensor_->publish_state(this->clients_.size() > 0);
-  #endif
-  #ifdef USE_SENSOR
-    if (this->connection_count_sensor_)
-      this->connection_count_sensor_->publish_state(this->clients_.size());
-  #endif
-}
 
 //---------------------------------------------------------------------------
 /// @brief Write TCP port
@@ -489,6 +464,19 @@ void WWRESIComponent::revert_config_action() {
 }
 
 //---------------------------------------------------------------------------
+/** This method will be called repeatedly.
+ *
+ * Analogous to Arduino's loop(). setup() is guaranteed to be called before this.
+ * Defaults to doing nothing.
+ */
+void WWRESIComponent::loop() {
+  get_cmd_new();
+  get_read_DIN();
+
+  config_write_nvs_();
+}
+
+//---------------------------------------------------------------------------
 /// @brief read new command from interfaces uart,eth,can
 void WWRESIComponent::get_cmd_new() {
   // If there is a active send command do not process it here, the send command call will handle it.
@@ -519,262 +507,129 @@ void WWRESIComponent::handle_uart_() {
 //---------------------------------------------------------------------------
 /// @brief
 void WWRESIComponent::handle_net_() {
-  this->so_accept();
-  this->so_cleanup();
-  this->so_flush();
-  this->so_write();
-  this->so_cleanup();
+  if (client_ == nullptr) {
+    struct sockaddr_storage source_addr;
+    socklen_t addr_len = sizeof(source_addr);
+    client_ = server_->accept((struct sockaddr *) &source_addr, &addr_len);
+    if (client_ == nullptr)
+      return;
 
-  // if (client_ == nullptr) {
-  //   struct sockaddr_storage source_addr;
-  //   socklen_t addr_len = sizeof(source_addr);
-  //   client_ = socket_->accept((struct sockaddr *) &source_addr, &addr_len);
-  //   if (client_ == nullptr)
-  //     return;
+    ESP_LOGD(TAG, "Socket client accept: %s", client_->getpeername().c_str());
 
-  //   ESP_LOGD(TAG, "Socket client accept: %s", client_->getpeername().c_str());
+    int i = 1;
+    int err = client_->setsockopt(SOL_SOCKET, SO_KEEPALIVE, (char *) &i, sizeof(int));
+    if (err != 0) {
+      ESP_LOGW(TAG, "Socket could not enable keepalive, errno: %d", errno);
+    }
 
-  //   int i = 1;
-  //   int err = client_->setsockopt(SOL_SOCKET, SO_KEEPALIVE, (char *) &i, sizeof(int));
-  //   if (err != 0) {
-  //     ESP_LOGW(TAG, "Socket could not enable keepalive, errno: %d", errno);
-  //   }
+    int enable = 1;
+    err = client_->setsockopt(IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int));
+    if (err != 0) {
+      ESP_LOGW(TAG, "Socket could not enable tcp nodelay, errno: %d", errno);
+    }
 
-  //   int enable = 1;
-  //   err = client_->setsockopt(IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int));
-  //   if (err != 0) {
-  //     ESP_LOGW(TAG, "Socket could not enable tcp nodelay, errno: %d", errno);
-  //   }
+    enable = 1;
+    err = server_->setsockopt(SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
+    if (err != 0) {
+      ESP_LOGW(TAG, "  Socket unable to set reuseaddr: errno %d", err);
+      // we can still continue
+    }
 
-  //   enable = 1;
-  //   err = socket_->setsockopt(SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
-  //   if (err != 0) {
-  //     ESP_LOGW(TAG, "  Socket unable to set reuseaddr: errno %d", err);
-  //     // we can still continue
-  //   }
+    ESP_LOGW(TAG, "setsockopt 1 , errno: %d", err);
 
-  //   ESP_LOGW(TAG, "setsockopt 1 , errno: %d", err);
+    err = client_->setblocking(FALSE);
+    if (err != 0) {
+      ESP_LOGW(TAG, "setblocking could not set , errno: %d", errno);
+      client_ = nullptr;
+    }
+  }
 
-  //   err = client_->setblocking(FALSE);
-  //   if (err != 0) {
-  //     ESP_LOGW(TAG, "setblocking could not set , errno: %d", errno);
-  //     client_ = nullptr;
-  //   }
-  // }
-
-  // if (!network::is_connected) {
-  //   ESP_LOGD(TAG, "network disconnect");
-  //   client_ = nullptr;
-  //   return;
-  // }
-
-  // if (!ethernet::global_eth_component->is_connected()) {
-  //   ESP_LOGD(TAG, "ethernet disconnect");
-  //   client_ = nullptr;
-  //   return;
-  // }
-
-  // if (client_ == nullptr) {
-  //   ESP_LOGD(TAG, "Socket client null");
-  //   return;
-  // }
-
-  // // eth data input
-  // static uint8_t eth_buf[1460];
-  // // cmd buffer
-  // static uint8_t buffer[2048];
-  // static uint8_t rx_data;
-
-  // ssize_t len = this->client_->read(eth_buf, sizeof(eth_buf));
-  // // ssize_t len = this->client_->read(buf, 1);
-  // if (len > 0) {
-  //   if (debug) {
-  //     (TAG, "Socket read: len %d", len);
-  //   }
-
-  //   for (int i = 0; i < len; i++) {
-  //     if (debug) {
-  //       ESP_LOGD(TAG, "Socket read: %d - %c", eth_buf[i], ((char *) eth_buf)[i]);
-  //     }
-
-  //     rx_data = eth_buf[i];
-  //     this->readline_(S_NET, rx_data, buffer, sizeof(buffer));
-  //   }
-  // }
-  // if (len < 0) {
-  //   if (debug) {
-  //     (TAG, "Socket len < 0");
-  //   }
-  // }
-}
-
-void WWRESIComponent::so_accept() {
-  struct sockaddr_storage client_addr;
-  socklen_t client_addrlen = sizeof(client_addr);
-  std::unique_ptr<socket::Socket> socket =
-      this->socket_->accept(reinterpret_cast<struct sockaddr *>(&client_addr), &client_addrlen);
-  if (!socket)
+  if (!network::is_connected) {
+    ESP_LOGD(TAG, "network disconnect");
+    client_ = nullptr;
     return;
-
-  socket->setblocking(false);
-  std::string identifier = socket->getpeername();
-  this->clients_.emplace_back(std::move(socket), identifier, this->buf_head_);
-  ESP_LOGD(TAG, "New client connected from %s", identifier.c_str());
-  this->publish_sensor();
-}
-
-void WWRESIComponent::so_cleanup() {
-  auto discriminator = [](const Client &client) { return !client.disconnected; };
-  auto last_client = std::partition(this->clients_.begin(), this->clients_.end(), discriminator);
-  if (last_client != this->clients_.end()) {
-    this->clients_.erase(last_client, this->clients_.end());
-    this->publish_sensor();
   }
-}
 
-void WWRESIComponent::so_read() {
-  size_t len = 0;
-  int available;
-  while ((available = this->available()) > 0) { // Read uart
-    size_t free = this->buf_size_ - (this->buf_head_ - this->buf_tail_);
-    if (free == 0) {
-      // Only overwrite if nothing has been added yet, otherwise give flush() a chance to empty the buffer first.
-      if (len > 0)
-        return;
+  if (!ethernet::global_eth_component->is_connected()) {
+    ESP_LOGD(TAG, "ethernet disconnect");
+    client_ = nullptr;
+    return;
+  }
 
-      ESP_LOGE(TAG, "Incoming bytes available, but outgoing buffer is full: stream will be corrupted!");
-      free = std::min<size_t>(available, this->buf_size_);
-      this->buf_tail_ += free;
-      for (Client &client : this->clients_) {
-        if (client.position < this->buf_tail_) {
-          ESP_LOGW(TAG, "Dropped %u pending bytes for client %s", this->buf_tail_ - client.position,
-                   client.identifier.c_str());
-          client.position = this->buf_tail_;
-        }
-      }
+  if (client_ == nullptr) {
+    ESP_LOGD(TAG, "Socket client null");
+    return;
+  }
+
+  // eth data input
+  static uint8_t eth_buf[1460];
+  // cmd buffer
+  static uint8_t buffer[2048];
+  static uint8_t rx_data;
+
+  ssize_t len = this->client_->read(eth_buf, sizeof(eth_buf));
+  // ssize_t len = this->client_->read(buf, 1);
+  if (len > 0) {
+    if (debug) {
+      (TAG, "Socket read: len %d", len);
     }
 
-    // Fill all available contiguous space in the ring buffer.
-    len = std::min<size_t>(available, std::min<size_t>(this->buf_ahead(this->buf_head_), free));
-    this->read_array(&this->buf_[this->buf_index(this->buf_head_)], len);
-    this->buf_head_ += len;
+    for (int i = 0; i < len; i++) {
+      if (debug) {
+        ESP_LOGD(TAG, "Socket read: %d - %c", eth_buf[i], ((char *) eth_buf)[i]);
+      }
+
+      rx_data = eth_buf[i];
+      this->readline_(S_NET, rx_data, buffer, sizeof(buffer));
+    }
+  }
+  if (len < 0) {
+    // int err = client_->close();
+    if (debug) {
+      (TAG, "Socket len < 0");
+    }
+    // if (err != 0) {
+    //   if (debug) {
+    //     (TAG, "Socket close error");
+    //   }
+    // }
+    // if (debug) {
+    //   (TAG, "Socket closeed");
+    // }
   }
 }
 
-void WWRESIComponent::so_flush() {
-  ssize_t written;
-  this->buf_tail_ = this->buf_head_;
-  for (Client &client : this->clients_) {
-    if (client.disconnected || client.position == this->buf_head_)
-      continue;
+bool WWRESIComponent::readall_(uint8_t *buf, size_t len) {
+  uint32_t start = millis();
+  uint32_t at = 0;
+  while (len - at > 0) {
+    uint32_t now = millis();
+    if (now - start > 1000) {
+      ESP_LOGW(TAG, "Timed out reading %d bytes of data", len);
+      return false;
+    }
 
-    // Split the write into two parts: from the current position to the end of the ring buffer, and from the start
-    // of the ring buffer until the head. The second part might be zero if no wraparound is necessary.
-    struct iovec iov[2];
-    iov[0].iov_base = &this->buf_[this->buf_index(client.position)];
-    iov[0].iov_len = std::min(this->buf_head_ - client.position, this->buf_ahead(client.position));
-    iov[1].iov_base = &this->buf_[0];
-    iov[1].iov_len = this->buf_head_ - (client.position + iov[0].iov_len);
-    if ((written = client.socket->writev(iov, 2)) > 0) {
-      client.position += written;
-    } else if (written == 0 || errno == ECONNRESET) {
-      ESP_LOGD(TAG, "Client %s disconnected", client.identifier.c_str());
-      client.disconnected = true;
-      continue;  // don't consider this client when calculating the tail position
-    } else if (errno == EWOULDBLOCK || errno == EAGAIN) {
-      // Expected if the (TCP) transmit buffer is full, nothing to do.
+    ssize_t read = this->client_->read(buf + at, len - at);
+    if (read == -1) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        App.feed_wdt();
+        delay(1);
+        continue;
+      }
+      ESP_LOGW(TAG, "Failed to read %d bytes of data, errno: %d", len, errno);
+      return false;
+    } else if (read == 0) {
+      ESP_LOGW(TAG, "Remote closed connection");
+      return false;
     } else {
-      ESP_LOGE(TAG, "Failed to write to client %s with error %d!", client.identifier.c_str(), errno);
-
-      // todo eso check if eth present ???
-      if (errno == ENOTCONN ||errno == ECONNABORTED) {
-        client.disconnected = true;
-      }
-      if (!network::is_connected) {
-        ESP_LOGE(TAG, "network disconnect");
-        client.disconnected = true;
-      }
-
-      if (!ethernet::global_eth_component->is_connected()) {
-        ESP_LOGE(TAG, "ethernet disconnect");
-          client.disconnected = true;
-      }
+      at += read;
     }
-
-    this->buf_tail_ = std::min(this->buf_tail_, client.position);
+    App.feed_wdt();
+    delay(1);
   }
+
+  return true;
 }
-
-void WWRESIComponent::so_write() {
-  uint8_t buf[128];
-  ssize_t read;
-  for (Client &client : this->clients_) {
-    if (client.disconnected)
-      continue;
-
-    while ((read = client.socket->read(&buf, sizeof(buf))) > 0)
-      this->write_array(buf, read);
-
-    if (read == 0 || errno == ECONNRESET) {
-      ESP_LOGD(TAG, "Client %s disconnected", client.identifier.c_str());
-      client.disconnected = true;
-    } else if (errno == EWOULDBLOCK || errno == EAGAIN) {
-      // Expected if the (TCP) receive buffer is empty, nothing to do.
-    } else {
-      ESP_LOGW(TAG, "Failed to read from client %s with error %d!", client.identifier.c_str(), errno);
-
-      // todo eso check if eth present ???
-      if (errno == ENOTCONN ||errno == ECONNABORTED) {
-        client.disconnected = true;
-      }
-      if (!network::is_connected) {
-        ESP_LOGE(TAG, "network disconnect");
-          client.disconnected = true;
-      }
-
-      if (!ethernet::global_eth_component->is_connected()) {
-        ESP_LOGE(TAG, "ethernet disconnect");
-          client.disconnected = true;
-      }
-    }
-  }
-}
-
-WWRESIComponent::Client::Client(std::unique_ptr<esphome::socket::Socket> socket, std::string identifier,
-                                size_t position)
-    : socket(std::move(socket)), identifier{identifier}, position{position} {}
-
-// bool WWRESIComponent::readall_(uint8_t *buf, size_t len) {
-//   uint32_t start = millis();
-//   uint32_t at = 0;
-//   while (len - at > 0) {
-//     uint32_t now = millis();
-//     if (now - start > 1000) {
-//       ESP_LOGW(TAG, "Timed out reading %d bytes of data", len);
-//       return false;
-//     }
-
-//     ssize_t read = this->client_->read(buf + at, len - at);
-//     if (read == -1) {
-//       if (errno == EAGAIN || errno == EWOULDBLOCK) {
-//         App.feed_wdt();
-//         delay(1);
-//         continue;
-//       }
-//       ESP_LOGW(TAG, "Failed to read %d bytes of data, errno: %d", len, errno);
-//       return false;
-//     } else if (read == 0) {
-//       ESP_LOGW(TAG, "Remote closed connection");
-//       return false;
-//     } else {
-//       at += read;
-//     }
-//     App.feed_wdt();
-//     delay(1);
-//   }
-
-//   return true;
-// }
 
 //---------------------------------------------------------------------------
 /// @brief read new DIN from digital inputs
@@ -1575,11 +1430,11 @@ void WWRESIComponent::writeTo(int fd, const string &str) {
       write_str((str.data()));
       break;
     case 1:  // net
-      // if (!client_) {
-      //   ESP_LOGW(TAG, "Eth client not connected");
-      //   return;
-      // }
-      // client_->write(str.data(), str.length());
+      if (!client_) {
+        ESP_LOGW(TAG, "Eth client not connected");
+        return;
+      }
+      client_->write(str.data(), str.length());
       break;
     case 2:  // can
       // eso todo
@@ -1613,24 +1468,21 @@ void WWRESIComponent::restart() {
 //---------------------------------------------------------------------------
 /// @brief read store_ from NVS
 void WWRESIComponent::config_read_nvs_() {
-  ESP_LOGCONFIG(TAG, "  Read saved config...");
+  ESP_LOGCONFIG(TAG, "  Setting up wwresi saved config...");
   // todo eso set all store_ to default
   switch (this->restore_mode_) {
     case WWRESI_RESTORE_DEFAULT_OPEN:
       this->nvs_ = global_preferences->make_preference<int32_t>(this->get_object_id_hash());
       if (!this->nvs_.load(&this->store)) {
-        ESP_LOGW(TAG, "  Load error, set to factory ");
+        ESP_LOGD(TAG, "  Load error, set to factory ");
         this->store.resistor = FACTORY_RESISTANCE;
       } else {
         this->store.resistor = clamp((int) this->store.resistor, FACTORY_RESISTANCE, RESI_R_MAX_M);
-
-        ESP_LOGCONFIG(TAG, "  Set resistor to %d ", this->store.resistor);
-        this->set_r_channel_number(0, this->store.resistor);
-        this->store.first_read = false;
       }
+
       break;
     case WWRESI_ALWAYS_OPEN:
-      ESP_LOGCONFIG(TAG, "  Set resistor to WWRESI_ALWAYS_OPEN ");
+      ESP_LOGD(TAG, "  Set resistor to WWRESI_ALWAYS_OPEN ");
       this->store.resistor = FACTORY_RESISTANCE;
       break;
   }
@@ -1647,7 +1499,7 @@ void WWRESIComponent::config_write_nvs_() {
       ESP_LOGD(TAG, "Save resistor %d ", resistor);
     }
     this->store.last_resistor = resistor;
-    // todo eso    this->publish_state(resistor);
+    this->publish_state(resistor);
     // this->listeners_.call(resistor);
     this->publish_initial_value_ = false;
   }

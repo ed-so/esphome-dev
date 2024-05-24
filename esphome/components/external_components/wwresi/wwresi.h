@@ -55,6 +55,7 @@ static const uint8_t WW_MR01_TOTAL_GATES = 16;
 static const uint16_t FACTORY_TIMEOUT = 120;
 static const int FACTORY_RESISTANCE = -1;
 static const int FACTORY_PORT = 43007;
+static const int FACTORY_BUF_SIZE = 1024;
 
 static const int CALIBRATE_VERSION_MIN = 154;
 
@@ -68,8 +69,7 @@ static const int S_CAN = 2;
 
 static const int RESI_R_MAX_M = 2666665;
 
-
-enum e_RESI{
+enum e_RESI {
   RESI_RELAYS_N = 4,
 
   // RESI_R_MAX = 266665,
@@ -86,23 +86,18 @@ enum e_MODE { e_REMOTE = 0, e_LOCAL = 1 };
 
 enum e_CONSTANTS { INDEX_MAX = 256, DEBOUNCE_DIN = 20000 };
 
-
 enum e_CHANNELS {
   CH_R0 = 0,
-  //CH_R1 = 1,
+  // CH_R1 = 1,
   CH_R_N = 2,
   CH_DOUT = 2,
   CH_DIN = 3,
   CH_R0V = 4,
-  //CH_R1V = 5,
+  // CH_R1V = 5,
 
   CH_N,
   CH_INVALID = 0x80000000
 };
-
-
-
-
 
 /// All possible restore modes for the resistor channel
 enum WWRESIRestoreMode {
@@ -114,7 +109,7 @@ struct WWRESIFlashData {
   bool first_read{true};
   float timeout{15};
 
-  volatile int32_t last_resistor{0};
+  volatile int32_t last_resistor{-1};
   volatile int32_t resistor{-1};
 
   char serial_number[8];
@@ -124,23 +119,21 @@ struct WWRESIFlashData {
 
 } PACKED;
 
-
-  struct RegConfigT {
-    int channel{0};
-    int resistor{-1};
-    // uint16_t max_gate{0};
-    uint16_t timeout{0};
-    //   uint32_t move_thresh[WW_MR01_TOTAL_GATES];
-    //   uint32_t still_thresh[WW_MR01_TOTAL_GATES];
-  };
-
+struct RegConfigT {
+  int channel{0};
+  int resistor{-1};
+  // uint16_t max_gate{0};
+  uint16_t timeout{0};
+  //   uint32_t move_thresh[WW_MR01_TOTAL_GATES];
+  //   uint32_t still_thresh[WW_MR01_TOTAL_GATES];
+};
 
 class WWRESIListener {
  public:
-  virtual void on_presence(bool presence){};
-  virtual void on_distance(uint16_t distance){};
-  virtual void on_energy(uint16_t *sensor_energy, size_t size){};
-  virtual void on_fw_version(std::string &fw){};
+  virtual void on_presence(bool presence) {};
+  virtual void on_distance(uint16_t distance) {};
+  virtual void on_energy(uint16_t *sensor_energy, size_t size) {};
+  virtual void on_fw_version(std::string &fw) {};
 };
 
 class t_CHANNELS;
@@ -183,7 +176,7 @@ class t_CHANNELS {
   operator int() { return chn; }
 };
 
-class WWRESIComponent : public sensor::Sensor, public Component, public uart::UARTDevice {
+class WWRESIComponent : public EntityBase, public Component, public uart::UARTDevice {
  public:
   WWRESIComponent();
   ~WWRESIComponent();
@@ -209,6 +202,8 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
    * Defaults to doing nothing.
    */
   void loop() override;
+
+  void on_shutdown() override;
 
   // Custom methods
 
@@ -265,9 +260,14 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
   void set_factory_reset_button(button::Button *button) { this->factory_reset_button_ = button; };
 #endif
 
+#ifdef USE_BINARY_SENSOR
+  void set_connected_sensor(binary_sensor::BinarySensor *connected) { this->connected_sensor_ = connected; }
+#endif
+#ifdef USE_SENSOR
+  void set_connection_count_sensor(sensor::Sensor *connection_count) { this->connection_count_sensor_ = connection_count; }
+#endif
+
   void register_listener(WWRESIListener *listener) { this->listeners_.push_back(listener); }
-
-
 
   void send_module_restart();
 
@@ -276,7 +276,11 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
   void factory_reset_action();
   void revert_config_action();
 
-  float get_setup_priority() const override;
+  //---------------------------------------------------------------------------
+  /// @brief priority of setup(). higher -> executed earlier
+  /// @return The setup priority of this component
+  float get_setup_priority() const override { return setup_priority::ETHERNET; }
+
   //   int send_cmd_from_array(CmdFrameT cmd_frame);
   //   void report_gate_data();
   //   void handle_cmd_error(uint8_t error);
@@ -288,7 +292,6 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
   // RegConfigT current_config;
   // RegConfigT new_config;
   WWRESIFlashData store;  // flash read/write
-
 
   //   int32_t last_periodic_millis = millis();
   //   int32_t report_periodic_millis = millis();
@@ -323,14 +326,46 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
 
   void set_resistor_value();
 
-
+  void set_buffer_size(size_t size) { this->buf_size_ = size; }
 
  protected:
+  void publish_sensor();
+
+  void so_accept();
+  void so_cleanup();
+  void so_read();
+  void so_flush();
+  void so_write();
+
+  size_t buf_index(size_t pos) { return pos & (this->buf_size_ - 1); }
+  /// Return the number of consecutive elements that are ahead of @p pos in memory.
+  size_t buf_ahead(size_t pos) { return (pos | (this->buf_size_ - 1)) - pos + 1; }
+
+  struct Client {
+    Client(std::unique_ptr<esphome::socket::Socket> socket, std::string identifier, size_t position);
+
+    std::unique_ptr<esphome::socket::Socket> socket{nullptr};
+    std::string identifier{};
+    bool disconnected{false};
+    size_t position{0};
+  };
+
+  std::unique_ptr<uint8_t[]> buf_{};
+  size_t buf_head_{0};
+  size_t buf_tail_{0};
+
   // ETH client/server socket
-  std::unique_ptr<socket::Socket> socket_ = nullptr;
-  std::unique_ptr<socket::Socket> client_ = nullptr;
+  std::unique_ptr<socket::Socket> socket_{};
+  // std::unique_ptr<socket::Socket> server_ = nullptr;
+
+  std::vector<Client> clients_{};
+  // std::unique_ptr<socket::Socket> client_ = nullptr;
+
+  size_t buf_size_{FACTORY_BUF_SIZE};
   uint16_t port_{FACTORY_PORT};
 
+
+  // Store
   ESPPreferenceObject nvs_;  // Preference.h
   WWRESIRestoreMode restore_mode_{WWRESI_RESTORE_DEFAULT_OPEN};
   bool publish_initial_value_{false};
@@ -338,7 +373,12 @@ class WWRESIComponent : public sensor::Sensor, public Component, public uart::UA
   void config_read_nvs_();
   void config_write_nvs_();
 
-
+#ifdef USE_BINARY_SENSOR
+  binary_sensor::BinarySensor *connected_sensor_;
+#endif
+#ifdef USE_SENSOR
+  sensor::Sensor *connection_count_sensor_;
+#endif
 
   int get_firmware_int_(const char *version_string);
   void get_firmware_version_();
